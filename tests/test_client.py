@@ -6,16 +6,16 @@ import pytest
 from aioharmony.exceptions import TimeOut
 
 from harmony_mcp.client import HarmonyError, HubClient
-from harmony_mcp.config import Settings
+from harmony_mcp.config import HubSettings
 
-from .conftest import ONKYO, WATCH_SHIELD, wait_until
+from .conftest import LIVING, ONKYO, WATCH_SHIELD, wait_until
 
 pytestmark = pytest.mark.anyio
 
 
 @pytest.fixture
-async def hub(settings, fake):
-    c = HubClient(settings, api_factory=fake.build)
+async def hub(fake):
+    c = HubClient(HubSettings(LIVING), api_factory=fake.build)
     await c.start()
     await wait_until(lambda: c.available)
     yield c
@@ -28,21 +28,34 @@ async def test_connects_with_settings(hub, fake):
     assert len(hub.catalog.activities) == 2
 
 
-async def test_retries_until_the_hub_answers(settings, fake):
+async def test_retries_until_the_hub_answers(fake):
     fake.connect_results = [False, TimeOut(), OSError("no route"), True]
-    c = HubClient(settings, api_factory=fake.build)
+    c = HubClient(HubSettings(LIVING), api_factory=fake.build)
     await c.start()
     await wait_until(lambda: c.available)
     assert fake.connect_calls == 4
     await c.stop()
 
 
-async def test_unconfigured_never_connects(fake):
-    c = HubClient(Settings(host=None), api_factory=fake.build)
+async def test_name_comes_from_config_then_hub_then_address(fake):
+    c = HubClient(HubSettings(LIVING), api_factory=fake.build)
+    assert c.name == LIVING  # not connected yet
     await c.start()
-    assert fake.connect_calls == 0
-    with pytest.raises(HarmonyError, match="HARMONY_HOST"):
+    await wait_until(lambda: c.available)
+    assert c.name == "Living Room"  # the hub's friendlyName
+    assert c.answers_to("living room") and c.answers_to(LIVING) and not c.answers_to("Den")
+    await c.stop()
+    named = HubClient(HubSettings(LIVING, "Family Room"), api_factory=fake.build)
+    assert named.name == "Family Room"
+
+
+async def test_offline_hub_errors_name_it(fake):
+    fake.connect_results = [False] * 1000
+    c = HubClient(HubSettings(LIVING, "Family Room"), api_factory=fake.build)
+    await c.start()
+    with pytest.raises(HarmonyError, match=f"Can't reach the Harmony hub 'Family Room' at {LIVING}"):
         await c.power_off()
+    await c.stop()
 
 
 async def test_start_activity_tracks_state(hub, fake):
@@ -84,7 +97,7 @@ async def test_commands_wait_out_an_activity_sequence(hub, fake):
     fake.push_starting(WATCH_SHIELD)
     assert hub.snapshot()["transition"] == "starting Watch Shield"
     cmd = hub.catalog.device("Onkyo AV Receiver").commands[0]
-    with pytest.raises(HarmonyError, match="busy starting Watch Shield"):
+    with pytest.raises(HarmonyError, match="Living Room is busy starting Watch Shield"):
         await hub.send(cmd)
     assert fake.sent == []
 
@@ -101,21 +114,21 @@ async def test_send_repeats_with_pauses_between(hub, fake, monkeypatch):
 async def test_hub_rejection_is_reported(hub, fake):
     fake.failing_commands = {"VolumeUp"}
     cmd = hub.catalog.find_command(hub.catalog.device("Onkyo AV Receiver").commands, "VolumeUp")
-    with pytest.raises(HarmonyError, match="rejected VolumeUp for Onkyo AV Receiver"):
+    with pytest.raises(HarmonyError, match="Living Room rejected VolumeUp for Onkyo AV Receiver"):
         await hub.send(cmd)
 
 
 async def test_disconnect_and_config_change(hub, fake):
     fake.push_disconnect()
     assert hub.snapshot()["reachable"] is False
-    with pytest.raises(HarmonyError, match="Can't reach the Harmony hub at 192.0.2.20"):
+    with pytest.raises(HarmonyError, match=f"Can't reach the Harmony hub 'Living Room' at {LIVING}"):
         await hub.power_off()
     fake.callbacks.config_updated({"activity": [{"id": "5", "label": "Game"}], "device": []})
     assert [a.name for a in hub.catalog.activities] == ["Game"]
 
 
-async def test_stop_closes_the_connection(settings, fake):
-    c = HubClient(settings, api_factory=fake.build)
+async def test_stop_closes_the_connection(fake):
+    c = HubClient(HubSettings(LIVING), api_factory=fake.build)
     await c.start()
     await wait_until(lambda: c.available)
     await c.stop()

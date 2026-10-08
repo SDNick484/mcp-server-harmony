@@ -25,7 +25,7 @@ async def test_serve_over_stdio(tmp_path):
         pytest.skip("entry point not installed (pip install -e .)")
     env = {**os.environ, "HARMONY_CONFIG_DIR": str(tmp_path)}
     env.pop("HARMONY_HOST", None)
+    env.pop("HARMONY_HOSTS", None)
     async with Client(StdioServerParameters(command=exe, args=[], env=env)) as c:
         assert {t.name for t in (await c.list_tools()).tools} == TOOL_NAMES
-        status = (await c.call_tool("get_status", {})).structured_content
-        assert (status["host"], status["reachable"]) == (None, False)
+        assert (await c.call_tool("get_status", {})).structured_content == {"hubs": []}

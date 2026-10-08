@@ -81,7 +81,7 @@ class Activity:
     commands: tuple[Command, ...] = field(default=(), repr=False)
 
 
-def _norm(name: str) -> str:
+def norm(name: str) -> str:
     """Matching key: case-, space-, dash- and underscore-insensitive.
 
     The model may say "volume up", "Volume Up", "VolumeUp" or "volume_up";
@@ -116,9 +116,9 @@ def _parse_commands(control_groups: Any) -> tuple[Command, ...]:
 
 
 def _find(commands: tuple[Command, ...], wanted: str) -> Command | None:
-    key = _norm(wanted)
+    key = norm(wanted)
     for c in commands:
-        if _norm(c.name) == key or _norm(c.label) == key:
+        if norm(c.name) == key or norm(c.label) == key:
             return c
     return None
 
@@ -162,15 +162,15 @@ class Catalog:
 
     # --- lookups by what the model typed ----------------------------------
     def activity(self, name: str) -> Activity | None:
-        key = _norm(name)
-        return next((a for a in self.activities if _norm(a.name) == key), None)
+        key = norm(name)
+        return next((a for a in self.activities if norm(a.name) == key), None)
 
     def activity_by_id(self, activity_id: int | None) -> Activity | None:
         return next((a for a in self.activities if a.activity_id == activity_id), None)
 
     def device(self, name: str) -> Device | None:
-        key = _norm(name)
-        return next((d for d in self.devices if _norm(d.name) == key), None)
+        key = norm(name)
+        return next((d for d in self.devices if norm(d.name) == key), None)
 
     def device_name(self, device_id: int) -> str:
         d = next((d for d in self.devices if d.device_id == device_id), None)

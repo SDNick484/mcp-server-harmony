@@ -26,8 +26,8 @@ from aioharmony.harmonyapi import HarmonyAPI
 from mcp.server.mcpserver.exceptions import ToolError
 from typing_extensions import TypedDict
 
-from .catalog import POWER_OFF_ID, Activity, Catalog, Command
-from .config import Settings
+from .catalog import POWER_OFF_ID, Activity, Catalog, Command, norm
+from .config import HubSettings, Protocol
 
 log = logging.getLogger(__name__)
 
@@ -36,7 +36,7 @@ class HarmonyError(ToolError):
     """A problem the model (and user) can act on.
 
     Only ToolError messages reach the model; any other exception shows up as
-    a bare "Error executing tool", which would hide advice like "set HARMONY_HOST".
+    a bare "Error executing tool", which would hide advice like "run check --host".
     """
 
 
@@ -49,9 +49,9 @@ class ActivityRef(TypedDict):
 
 
 class Status(TypedDict):
-    host: str | None
+    hub: str
+    host: str
     reachable: bool
-    hub_name: str | None
     firmware: str | None
     power: Literal["on", "off"] | None
     current_activity: ActivityRef | None
@@ -66,6 +66,9 @@ ApiFactory = Callable[..., Any]
 
 class HubClient:
     """Owns the connection to one hub and the latest state it pushed.
+
+    One per hub; HubRegistry (hubs.py) holds them all and decides which one a
+    tool call is about.
 
     State (written by aioharmony's callbacks, read by tools):
       available         - connected right now.
@@ -88,8 +91,11 @@ class HubClient:
     # First reconnect wait; doubles up to 60s. (Class attributes so tests can shrink them.)
     retry_delay = 1.0
 
-    def __init__(self, settings: Settings, api_factory: ApiFactory = HarmonyAPI) -> None:
-        self.settings = settings
+    def __init__(
+        self, hub: HubSettings, protocol: Protocol | None = None, api_factory: ApiFactory = HarmonyAPI
+    ) -> None:
+        self.hub = hub
+        self.protocol = protocol
         self._api_factory = api_factory
         self._api: Any = None
         self._task: asyncio.Task[None] | None = None
@@ -99,10 +105,30 @@ class HubClient:
         self.catalog = Catalog()
 
     # --- lifecycle -----------------------------------------------------------
+    @property
+    def host(self) -> str:
+        return self.hub.host
+
+    @property
+    def name(self) -> str:
+        """What to call this hub: the configured name, else the hub's own, else its address.
+
+        aioharmony's ``name`` falls back to the IP when the hub hasn't said its
+        friendlyName, so that case lands on the host too.
+        """
+        if self.hub.name:
+            return self.hub.name
+        live = self._api.name if self._api is not None else None
+        return live if isinstance(live, str) and live else self.host
+
+    def answers_to(self, wanted: str) -> bool:
+        """True if `wanted` names this hub: configured name, the hub's own name, or its address."""
+        key = norm(wanted)
+        live = self._api.name if self._api is not None else None
+        candidates = [self.hub.name, live if isinstance(live, str) else None, self.host]
+        return any(c and norm(c) == key for c in candidates) or wanted.strip() == self.host
+
     async def start(self) -> None:
-        if not self.settings.configured:
-            log.warning("No hub address; set HARMONY_HOST or run `mcp-server-harmony check --host <ip>`.")
-            return
         self._task = asyncio.create_task(self._connect_forever(), name="harmony-connect")
 
     async def stop(self) -> None:
@@ -133,7 +159,7 @@ class HubClient:
             new_activity=self._on_activity,
             config_updated=self._on_config,
         )
-        api = self._api_factory(ip_address=self.settings.host, protocol=self.settings.protocol, callbacks=callbacks)
+        api = self._api_factory(ip_address=self.host, protocol=self.protocol, callbacks=callbacks)
         delay = self.retry_delay
         while True:
             try:
@@ -142,7 +168,7 @@ class HubClient:
                 reason = "connect returned False"
             except (HarmonyException, OSError, TimeoutError) as exc:
                 reason = str(exc) or type(exc).__name__
-            log.info("Harmony hub unreachable (%s); retrying in %.0fs", reason, delay)
+            log.info("Harmony hub %s unreachable (%s); retrying in %.0fs", self.name, reason, delay)
             await asyncio.sleep(delay)
             delay = min(delay * 2, 60.0)
 
@@ -152,8 +178,8 @@ class HubClient:
         self.available = True
         log.info(
             "Connected to %s at %s: %d activities, %d devices",
-            api.name,
-            self.settings.host,
+            self.name,
+            self.host,
             len(self.catalog.activities),
             len(self.catalog.devices),
         )
@@ -174,17 +200,13 @@ class HubClient:
 
     def _on_config(self, config: dict[str, Any]) -> None:
         self.catalog = Catalog.from_config(config)
-        log.info("Hub config changed; reloaded %d activities", len(self.catalog.activities))
+        log.info("%s: config changed; reloaded %d activities", self.name, len(self.catalog.activities))
 
     # --- commands ------------------------------------------------------------
     def _require(self) -> Any:
-        if not self.settings.configured:
-            raise HarmonyError(
-                "No Harmony hub configured. Set HARMONY_HOST, or run `mcp-server-harmony check --host <ip>`."
-            )
         if self._api is None or not self.available:
             raise HarmonyError(
-                f"Can't reach the Harmony hub at {self.settings.host}. It may be offline or its IP may have "
+                f"Can't reach the Harmony hub {self.name!r} at {self.host}. It may be offline or its IP may have "
                 "changed; the server keeps retrying in the background."
             )
         return self._api
@@ -200,7 +222,7 @@ class HubClient:
         api = self._require()
         if self.starting_id is not None:
             what = "powering off" if self.starting_id == POWER_OFF_ID else f"starting {self._name(self.starting_id)}"
-            raise HarmonyError(f"The hub is busy {what}; {doing} once it finishes (check get_status).")
+            raise HarmonyError(f"{self.name} is busy {what}; {doing} once it finishes (check get_status).")
         return api
 
     async def start_activity(self, activity: Activity) -> bool:
@@ -230,11 +252,11 @@ class HubClient:
                 ok, msg = await api.start_activity(activity_id)
         except TimeoutError as exc:
             raise HarmonyError(
-                f"The hub didn't finish '{what}' within {self.activity_timeout:.0f}s. It may still be running; "
+                f"{self.name} didn't finish '{what}' within {self.activity_timeout:.0f}s. It may still be running; "
                 "check get_status before retrying."
             ) from exc
         if not ok:
-            raise HarmonyError(f"The hub refused '{what}': {msg or 'no reason given'}")
+            raise HarmonyError(f"{self.name} refused '{what}': {msg or 'no reason given'}")
         # The pushed "new activity" normally arrives before start_activity
         # returns, but don't depend on callback ordering for our own state.
         self.activity_id = activity_id
@@ -253,7 +275,7 @@ class HubClient:
         if errors:
             e = errors[0]
             raise HarmonyError(
-                f"The hub rejected {command.name} for {self.catalog.device_name(command.device_id)}: "
+                f"{self.name} rejected {command.name} for {self.catalog.device_name(command.device_id)}: "
                 f"{e.msg} (code {e.code})"
             )
 
@@ -276,9 +298,9 @@ class HubClient:
         if self.activity_id is not None:
             power = "off" if self.activity_id == POWER_OFF_ID else "on"
         return {
-            "host": self.settings.host,
+            "hub": self.name,
+            "host": self.host,
             "reachable": self.available,
-            "hub_name": api.name if api is not None else None,
             "firmware": api.fw_version if api is not None else None,
             "power": power,
             "current_activity": self._ref(self.activity_id),

@@ -1,7 +1,8 @@
-"""MCP tools, called through a real MCP client connected in-process.
+"""MCP tools, called through a real MCP client connected in-process (one hub).
 
 This tests the contract the model actually sees: tools/list (names, titles,
 annotations, input and output schemas), argument validation, and results.
+test_multi_hub.py covers what changes with two hubs.
 """
 
 from __future__ import annotations
@@ -10,9 +11,9 @@ import pytest
 from mcp import Client
 
 from harmony_mcp import server
-from harmony_mcp.client import HubClient
+from harmony_mcp.hubs import HubRegistry
 
-from .conftest import ONKYO, SHIELD, WATCH_SHIELD, wait_until
+from .conftest import LIVING, ONKYO, SHIELD, WATCH_SHIELD, wait_until
 
 pytestmark = pytest.mark.anyio
 
@@ -27,13 +28,21 @@ TOOL_NAMES = {
 }
 
 
+async def connect(monkeypatch, factory):
+    """An in-process MCP client whose server talks to the fake hubs."""
+    # The lifespan builds the HubRegistry; swap in one that uses the fakes.
+    monkeypatch.setattr(server, "HubRegistry", lambda s: HubRegistry(s, api_factory=factory))
+    c = Client(server.mcp)
+    await c.__aenter__()
+    await wait_until(lambda: all(h.available for h in server.hubs().hubs))
+    return c
+
+
 @pytest.fixture
-async def mcp_client(settings, fake, monkeypatch):
-    # The lifespan builds the HubClient; swap in one that uses the fake hub.
-    monkeypatch.setattr(server, "HubClient", lambda s: HubClient(s, api_factory=fake.build))
-    async with Client(server.mcp) as c:
-        await wait_until(lambda: server.client().available)
-        yield c
+async def mcp_client(settings, factory, monkeypatch):
+    c = await connect(monkeypatch, factory)
+    yield c
+    await c.__aexit__(None, None, None)
 
 
 async def tools(c: Client) -> dict:
@@ -68,6 +77,15 @@ async def test_annotations_match_behavior(mcp_client):
     assert t["send_command"].annotations.idempotent_hint is False  # VolumeUp twice is +2
 
 
+async def test_every_tool_but_status_takes_an_optional_hub(mcp_client):
+    for name, t in (await tools(mcp_client)).items():
+        props = t.input_schema.get("properties", {})
+        if name == "get_status":
+            assert not props
+        else:
+            assert "hub" in props and "hub" not in t.input_schema.get("required", []), name
+
+
 async def test_send_command_schema(mcp_client):
     schema = (await tools(mcp_client))["send_command"].input_schema
     props = schema["properties"]
@@ -77,28 +95,25 @@ async def test_send_command_schema(mcp_client):
 
 async def test_get_status_publishes_output_schema(mcp_client):
     schema = (await tools(mcp_client))["get_status"].output_schema
-    assert set(schema["required"]) == {
-        "host",
-        "reachable",
-        "hub_name",
-        "firmware",
-        "power",
-        "current_activity",
-        "transition",
-    }
+    hub = schema["$defs"]["Status"]
+    assert set(hub["required"]) == {"hub", "host", "reachable", "firmware", "power", "current_activity", "transition"}
 
 
 # --- tools/call --------------------------------------------------------------
 async def test_get_status(mcp_client):
     result = await mcp_client.call_tool("get_status", {})
     assert result.structured_content == {
-        "host": "192.0.2.20",
-        "reachable": True,
-        "hub_name": "Living Room Hub",
-        "firmware": "4.15.600",
-        "power": "off",
-        "current_activity": None,
-        "transition": None,
+        "hubs": [
+            {
+                "hub": "Living Room",
+                "host": LIVING,
+                "reachable": True,
+                "firmware": "4.15.600",
+                "power": "off",
+                "current_activity": None,
+                "transition": None,
+            }
+        ]
     }
 
 
@@ -106,36 +121,45 @@ async def test_list_activities_marks_the_running_one(mcp_client):
     await mcp_client.call_tool("start_activity", {"activity": "Watch Shield"})
     rows = (await mcp_client.call_tool("list_activities", {})).structured_content["result"]
     assert {r["name"]: r["running"] for r in rows} == {"Watch Shield": True, "Listen to Music": False}
+    assert {r["hub"] for r in rows} == {"Living Room"}
 
 
 async def test_list_commands_defaults_to_the_running_activity(mcp_client):
     result = await mcp_client.call_tool("list_commands", {})
     assert result.is_error and "No activity is running" in text(result)
     await mcp_client.call_tool("start_activity", {"activity": "watch shield"})
-    rows = (await mcp_client.call_tool("list_commands", {})).structured_content["result"]
-    assert {r["name"]: r["device"] for r in rows}["VolumeUp"] == "Onkyo AV Receiver"
+    listing = (await mcp_client.call_tool("list_commands", {})).structured_content
+    assert (listing["hub"], listing["source"]) == ("Living Room", "activity Watch Shield")
+    assert {r["name"]: r["device"] for r in listing["commands"]}["VolumeUp"] == "Onkyo AV Receiver"
 
 
 async def test_start_activity_twice(mcp_client, fake):
-    assert text(await mcp_client.call_tool("start_activity", {"activity": "Watch Shield"})) == "Started Watch Shield"
-    assert text(await mcp_client.call_tool("start_activity", {"activity": "Watch Shield"})) == (
-        "Watch Shield was already running"
-    )
+    result = await mcp_client.call_tool("start_activity", {"activity": "Watch Shield"})
+    assert text(result) == "Started Watch Shield on Living Room"
+    result = await mcp_client.call_tool("start_activity", {"activity": "Watch Shield"})
+    assert text(result) == "Watch Shield was already running on Living Room"
     assert fake.started == [WATCH_SHIELD]
 
 
 async def test_unknown_activity_lists_known_ones(mcp_client, fake):
     result = await mcp_client.call_tool("start_activity", {"activity": "Watch Netflix"})
     assert result.is_error
-    assert "Unknown activity 'Watch Netflix'. Activities: Watch Shield, Listen to Music" in text(result)
+    assert "Unknown activity 'Watch Netflix'. Living Room: Watch Shield, Listen to Music." in text(result)
     assert fake.started == []
+
+
+async def test_power_off(mcp_client, fake):
+    assert text(await mcp_client.call_tool("power_off", {})) == "Everything was already off"
+    await mcp_client.call_tool("start_activity", {"activity": "Watch Shield"})
+    assert text(await mcp_client.call_tool("power_off", {})) == "Living Room: powered off"
+    assert fake.started == [WATCH_SHIELD, -1]
 
 
 async def test_send_command_routes_through_the_activity(mcp_client, fake):
     # The model says "volume up"; the activity knows volume lives on the receiver.
     await mcp_client.call_tool("start_activity", {"activity": "Watch Shield"})
     result = await mcp_client.call_tool("send_command", {"command": "volume up", "repeat": 2})
-    assert text(result) == "Sent VolumeUp x2 to Onkyo AV Receiver"
+    assert text(result) == "Sent VolumeUp x2 to Onkyo AV Receiver on Living Room"
     await mcp_client.call_tool("send_command", {"command": "Pause"})
     assert fake.presses() == [(ONKYO, "VolumeUp"), (ONKYO, "VolumeUp"), (SHIELD, "Pause")]
 
@@ -154,6 +178,7 @@ async def test_send_command_to_a_device_works_while_off(mcp_client, fake):
         {"command": "SelfDestruct", "device": "Onkyo AV Receiver"},
         {"command": "VolumeUp", "device": "Xbox"},
         {"command": "VolumeUp"},  # nothing running and no device
+        {"command": "VolumeUp", "device": "Onkyo AV Receiver", "hub": "Garage"},
     ],
 )
 async def test_bad_sends_never_reach_the_hub(mcp_client, fake, args):
@@ -171,16 +196,18 @@ async def test_a_command_from_another_device_is_not_a_back_door(mcp_client, fake
 
 async def test_unreachable_hub_explains_itself(mcp_client, fake):
     fake.push_disconnect()
-    result = await mcp_client.call_tool("power_off", {})
-    assert result.is_error and "Can't reach the Harmony hub" in text(result)
+    result = await mcp_client.call_tool("send_command", {"command": "PowerOn", "device": "Onkyo AV Receiver"})
+    assert result.is_error and "Can't reach the Harmony hub 'Living Room'" in text(result)
 
 
-async def test_unconfigured_server_still_answers_status(tmp_path, monkeypatch, fake):
+async def test_unconfigured_server_still_answers_status(tmp_path, monkeypatch, factory):
     monkeypatch.setenv("HARMONY_CONFIG_DIR", str(tmp_path))
     monkeypatch.delenv("HARMONY_HOST", raising=False)
-    monkeypatch.setattr(server, "HubClient", lambda s: HubClient(s, api_factory=fake.build))
-    async with Client(server.mcp) as c:
-        status = (await c.call_tool("get_status", {})).structured_content
-        assert (status["host"], status["reachable"]) == (None, False)
+    monkeypatch.delenv("HARMONY_HOSTS", raising=False)
+    c = await connect(monkeypatch, factory)
+    try:
+        assert (await c.call_tool("get_status", {})).structured_content == {"hubs": []}
         result = await c.call_tool("power_off", {})
-        assert result.is_error and "HARMONY_HOST" in text(result)
+        assert result.is_error and "check --host" in text(result)
+    finally:
+        await c.__aexit__(None, None, None)

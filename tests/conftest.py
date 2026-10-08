@@ -13,11 +13,18 @@ from aioharmony.const import ClientCallbackType, SendCommandDevice, SendCommandR
 from harmony_mcp.client import HubClient
 from harmony_mcp.config import Settings, load_settings
 
+LIVING = "192.0.2.20"
+DEN = "192.0.2.21"
+
 WATCH_SHIELD = 38000001
 LISTEN_MUSIC = 38000002
 ONKYO = 71000001
 SHIELD = 71000002
 TV = 71000003
+# The second hub (another TV). "Listen to Music" exists on both hubs on purpose.
+DEN_WATCH = 39000001
+DEN_MUSIC = 39000002
+DEN_TV = 72000001
 
 
 def _fn(name: str, label: str, device: int) -> dict[str, str]:
@@ -77,6 +84,32 @@ SAMPLE_CONFIG: dict[str, Any] = {
 }
 
 
+DEN_CONFIG: dict[str, Any] = {
+    "activity": [
+        {"id": "-1", "label": "PowerOff", "controlGroup": []},
+        {
+            "id": str(DEN_WATCH),
+            "label": "Watch TV",
+            "controlGroup": [{"name": "Volume", "function": [_fn("VolumeUp", "Volume Up", DEN_TV)]}],
+        },
+        {
+            "id": str(DEN_MUSIC),
+            "label": "Listen to Music",
+            "controlGroup": [{"name": "Volume", "function": [_fn("VolumeUp", "Volume Up", DEN_TV)]}],
+        },
+    ],
+    "device": [
+        {
+            "id": str(DEN_TV),
+            "label": "Den TV",
+            "manufacturer": "Sony",
+            "model": "Bravia",
+            "controlGroup": [{"name": "Volume", "function": [_fn("VolumeUp", "Volume Up", DEN_TV)]}],
+        }
+    ],
+}
+
+
 # Async tests use anyio's plugin (pytest.mark.anyio), not pytest-asyncio: the
 # MCP SDK's in-process Client needs fixture setup and teardown in one task.
 @pytest.fixture
@@ -94,14 +127,14 @@ class FakeHarmonyAPI:
     and returns only the *failed* presses. A friendlier fake would hide bugs.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, config: dict[str, Any] | None = None, name: str = "Living Room") -> None:
         self.callbacks: ClientCallbackType | None = None
         self.built_with: dict[str, Any] = {}
         self.connect_results: list[bool | Exception] = []  # consumed in order; then True
         self.connect_calls = 0
         self.closed = False
-        self.config: dict[str, Any] = SAMPLE_CONFIG
-        self.name = "Living Room Hub"
+        self.config: dict[str, Any] = SAMPLE_CONFIG if config is None else config
+        self.name = name
         self.fw_version = "4.15.600"
         self.protocol = "WEBSOCKETS"
         self.activity_id = -1
@@ -156,7 +189,7 @@ class FakeHarmonyAPI:
     # --- test helpers: simulate what the hub pushes ---------------------------
     def push_disconnect(self) -> None:
         assert self.callbacks is not None
-        self.callbacks.disconnect("192.0.2.20")
+        self.callbacks.disconnect(self.built_with["ip_address"])
 
     def push_starting(self, activity_id: int) -> None:
         assert self.callbacks is not None
@@ -174,17 +207,41 @@ def fast(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture
-def fake() -> FakeHarmonyAPI:
-    return FakeHarmonyAPI()
+def fakes() -> dict[str, FakeHarmonyAPI]:
+    """One fake per hub address. A hub whose fake is missing never answers."""
+    return {LIVING: FakeHarmonyAPI(SAMPLE_CONFIG, "Living Room"), DEN: FakeHarmonyAPI(DEN_CONFIG, "Den")}
+
+
+@pytest.fixture
+def fake(fakes) -> FakeHarmonyAPI:
+    return fakes[LIVING]
+
+
+@pytest.fixture
+def factory(fakes):
+    """An api_factory that hands each hub address its own fake, like HarmonyAPI(ip_address=...)."""
+
+    def build(*, ip_address: str, protocol: str | None, callbacks: ClientCallbackType) -> FakeHarmonyAPI:
+        return fakes[ip_address].build(ip_address=ip_address, protocol=protocol, callbacks=callbacks)
+
+    return build
 
 
 @pytest.fixture
 def config_dir(tmp_path, monkeypatch):
-    """An isolated config directory (never the user's real one)."""
+    """An isolated config directory (never the user's real one), with one hub."""
     monkeypatch.setenv("HARMONY_CONFIG_DIR", str(tmp_path))
     monkeypatch.delenv("HARMONY_HOST", raising=False)
-    (tmp_path / "config.json").write_text(json.dumps({"host": "192.0.2.20"}))
+    monkeypatch.delenv("HARMONY_HOSTS", raising=False)
+    (tmp_path / "config.json").write_text(json.dumps({"hubs": [{"host": LIVING}]}))
     return tmp_path
+
+
+@pytest.fixture
+def two_hubs(config_dir):
+    """Both hubs configured; the Den's name comes from config, the Living Room's from the hub."""
+    (config_dir / "config.json").write_text(json.dumps({"hubs": [{"host": LIVING}, {"host": DEN, "name": "Den"}]}))
+    return config_dir
 
 
 @pytest.fixture
