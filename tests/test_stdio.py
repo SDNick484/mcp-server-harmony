@@ -28,4 +28,4 @@ async def test_serve_over_stdio(tmp_path):
     env.pop("HARMONY_HOSTS", None)
     async with Client(StdioServerParameters(command=exe, args=[], env=env)) as c:
         assert {t.name for t in (await c.list_tools()).tools} == TOOL_NAMES
-        assert (await c.call_tool("get_status", {})).structured_content == {"hubs": []}
+        assert (await c.call_tool("get_status", {})).structured_content == {"dry_run": False, "hubs": []}

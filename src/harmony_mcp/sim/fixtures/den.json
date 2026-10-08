@@ -1,0 +1,62 @@
+{
+ "_comment": "Hand-built in the shape of HarmonyAPI.config (string ids, JSON-string actions). NOT recorded from a hub; see assumptions H-CONFIG-SHAPE. Replace or extend with `mcp-server-harmony doctor --dump`.",
+ "activity": [
+  {
+   "id": "-1",
+   "label": "PowerOff",
+   "controlGroup": []
+  },
+  {
+   "id": "39000001",
+   "label": "Watch TV",
+   "controlGroup": [
+    {
+     "name": "Volume",
+     "function": [
+      {
+       "name": "VolumeUp",
+       "label": "Volume Up",
+       "action": "{\"command\": \"VolumeUp\", \"type\": \"IRCommand\", \"deviceId\": \"72000001\"}"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "39000002",
+   "label": "Listen to Music",
+   "controlGroup": [
+    {
+     "name": "Volume",
+     "function": [
+      {
+       "name": "VolumeUp",
+       "label": "Volume Up",
+       "action": "{\"command\": \"VolumeUp\", \"type\": \"IRCommand\", \"deviceId\": \"72000001\"}"
+      }
+     ]
+    }
+   ]
+  }
+ ],
+ "device": [
+  {
+   "id": "72000001",
+   "label": "Den TV",
+   "manufacturer": "Sony",
+   "model": "Bravia",
+   "controlGroup": [
+    {
+     "name": "Volume",
+     "function": [
+      {
+       "name": "VolumeUp",
+       "label": "Volume Up",
+       "action": "{\"command\": \"VolumeUp\", \"type\": \"IRCommand\", \"deviceId\": \"72000001\"}"
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

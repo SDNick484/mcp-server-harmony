@@ -53,6 +53,18 @@ def text(result) -> str:
     return result.content[0].text
 
 
+def detail(result) -> str:
+    """The one-sentence detail of a write tool's structured result."""
+    assert not result.is_error, text(result)
+    return result.structured_content["detail"]
+
+
+def outcomes(result) -> list[tuple[str, str]]:
+    """(hub, outcome) per hub from power_off."""
+    assert not result.is_error, text(result)
+    return [(r["hub"], r["outcome"]) for r in result.structured_content["results"]]
+
+
 # --- tools/list --------------------------------------------------------------
 async def test_tool_names(mcp_client):
     assert set(await tools(mcp_client)) == TOOL_NAMES
@@ -103,6 +115,7 @@ async def test_get_status_publishes_output_schema(mcp_client):
 async def test_get_status(mcp_client):
     result = await mcp_client.call_tool("get_status", {})
     assert result.structured_content == {
+        "dry_run": False,
         "hubs": [
             {
                 "hub": "Living Room",
@@ -113,7 +126,7 @@ async def test_get_status(mcp_client):
                 "current_activity": None,
                 "transition": None,
             }
-        ]
+        ],
     }
 
 
@@ -135,9 +148,9 @@ async def test_list_commands_defaults_to_the_running_activity(mcp_client):
 
 async def test_start_activity_twice(mcp_client, fake):
     result = await mcp_client.call_tool("start_activity", {"activity": "Watch Shield"})
-    assert text(result) == "Started Watch Shield on Living Room"
+    assert detail(result) == "Start Watch Shield on Living Room"
     result = await mcp_client.call_tool("start_activity", {"activity": "Watch Shield"})
-    assert text(result) == "Watch Shield was already running on Living Room"
+    assert detail(result) == "Watch Shield was already running on Living Room"
     assert fake.started == [WATCH_SHIELD]
 
 
@@ -149,9 +162,9 @@ async def test_unknown_activity_lists_known_ones(mcp_client, fake):
 
 
 async def test_power_off(mcp_client, fake):
-    assert text(await mcp_client.call_tool("power_off", {})) == "Everything was already off"
+    assert outcomes(await mcp_client.call_tool("power_off", {})) == []
     await mcp_client.call_tool("start_activity", {"activity": "Watch Shield"})
-    assert text(await mcp_client.call_tool("power_off", {})) == "Living Room: powered off"
+    assert outcomes(await mcp_client.call_tool("power_off", {})) == [("Living Room", "done")]
     assert fake.started == [WATCH_SHIELD, -1]
 
 
@@ -159,7 +172,7 @@ async def test_send_command_routes_through_the_activity(mcp_client, fake):
     # The model says "volume up"; the activity knows volume lives on the receiver.
     await mcp_client.call_tool("start_activity", {"activity": "Watch Shield"})
     result = await mcp_client.call_tool("send_command", {"command": "volume up", "repeat": 2})
-    assert text(result) == "Sent VolumeUp x2 to Onkyo AV Receiver on Living Room"
+    assert detail(result) == "Send VolumeUp x2 to Onkyo AV Receiver on Living Room"
     await mcp_client.call_tool("send_command", {"command": "Pause"})
     assert fake.presses() == [(ONKYO, "VolumeUp"), (ONKYO, "VolumeUp"), (SHIELD, "Pause")]
 
@@ -206,7 +219,7 @@ async def test_unconfigured_server_still_answers_status(tmp_path, monkeypatch, f
     monkeypatch.delenv("HARMONY_HOSTS", raising=False)
     c = await connect(monkeypatch, factory)
     try:
-        assert (await c.call_tool("get_status", {})).structured_content == {"hubs": []}
+        assert (await c.call_tool("get_status", {})).structured_content == {"dry_run": False, "hubs": []}
         result = await c.call_tool("power_off", {})
         assert result.is_error and "check --host" in text(result)
     finally:

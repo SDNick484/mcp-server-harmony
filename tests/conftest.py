@@ -12,6 +12,8 @@ from aioharmony.const import ClientCallbackType, SendCommandDevice, SendCommandR
 
 from harmony_mcp.client import HubClient
 from harmony_mcp.config import Settings, load_settings
+from harmony_mcp.hubs import HubRegistry
+from harmony_mcp.sim.fake_hub import load_fixture
 
 LIVING = "192.0.2.20"
 DEN = "192.0.2.21"
@@ -27,87 +29,13 @@ DEN_MUSIC = 39000002
 DEN_TV = 72000001
 
 
-def _fn(name: str, label: str, device: int) -> dict[str, str]:
-    # The hub stores each action as a JSON *string* inside the JSON config.
-    return {
-        "name": name,
-        "label": label,
-        "action": json.dumps({"command": name, "type": "IRCommand", "deviceId": str(device)}),
-    }
-
-
+# The hub configs live in the package (sim/fixtures/*.json) so the wire-level
+# fake hub, `simulate`, and these in-process fakes all use the same data.
 # Shaped like HarmonyAPI.config from a real hub: string ids, a PowerOff
-# pseudo-activity (-1), and activities whose buttons route to different devices.
-SAMPLE_CONFIG: dict[str, Any] = {
-    "activity": [
-        {"id": "-1", "label": "PowerOff", "controlGroup": []},
-        {
-            "id": str(WATCH_SHIELD),
-            "label": "Watch Shield",
-            "controlGroup": [
-                {"name": "Volume", "function": [_fn("VolumeUp", "Volume Up", ONKYO), _fn("Mute", "Mute", ONKYO)]},
-                {"name": "TransportBasic", "function": [_fn("Pause", "Pause", SHIELD), _fn("Play", "Play", SHIELD)]},
-            ],
-        },
-        {
-            "id": str(LISTEN_MUSIC),
-            "label": "Listen to Music",
-            "controlGroup": [{"name": "Volume", "function": [_fn("VolumeUp", "Volume Up", ONKYO)]}],
-        },
-    ],
-    "device": [
-        {
-            "id": str(ONKYO),
-            "label": "Onkyo AV Receiver",
-            "manufacturer": "Onkyo",
-            "model": "TX-NR7100",
-            "controlGroup": [
-                {"name": "Power", "function": [_fn("PowerOn", "Power On", ONKYO), _fn("PowerOff", "Power Off", ONKYO)]},
-                {"name": "Volume", "function": [_fn("VolumeUp", "Volume Up", ONKYO)]},
-            ],
-        },
-        {
-            "id": str(SHIELD),
-            "label": "NVIDIA Shield",
-            "manufacturer": "NVIDIA",
-            "model": "Shield TV",
-            "controlGroup": [{"name": "TransportBasic", "function": [_fn("Pause", "Pause", SHIELD)]}],
-        },
-        {
-            "id": str(TV),
-            "label": "Living Room TV",
-            "manufacturer": "LG",
-            "model": "OLED65",
-            "controlGroup": [{"name": "Power", "function": [_fn("PowerToggle", "Power Toggle", TV)]}],
-        },
-    ],
-}
-
-
-DEN_CONFIG: dict[str, Any] = {
-    "activity": [
-        {"id": "-1", "label": "PowerOff", "controlGroup": []},
-        {
-            "id": str(DEN_WATCH),
-            "label": "Watch TV",
-            "controlGroup": [{"name": "Volume", "function": [_fn("VolumeUp", "Volume Up", DEN_TV)]}],
-        },
-        {
-            "id": str(DEN_MUSIC),
-            "label": "Listen to Music",
-            "controlGroup": [{"name": "Volume", "function": [_fn("VolumeUp", "Volume Up", DEN_TV)]}],
-        },
-    ],
-    "device": [
-        {
-            "id": str(DEN_TV),
-            "label": "Den TV",
-            "manufacturer": "Sony",
-            "model": "Bravia",
-            "controlGroup": [{"name": "Volume", "function": [_fn("VolumeUp", "Volume Up", DEN_TV)]}],
-        }
-    ],
-}
+# pseudo-activity (-1), activities whose buttons route to different devices,
+# and "Listen to Music" on both hubs on purpose.
+SAMPLE_CONFIG: dict[str, Any] = load_fixture("living_room")
+DEN_CONFIG: dict[str, Any] = load_fixture("den")
 
 
 # Async tests use anyio's plugin (pytest.mark.anyio), not pytest-asyncio: the
@@ -204,6 +132,7 @@ def fast(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(HubClient, "activity_timeout", 0.2)
     monkeypatch.setattr(HubClient, "repeat_gap", 0.0)
     monkeypatch.setattr(HubClient, "retry_delay", 0.0)
+    monkeypatch.setattr(HubRegistry, "startup_grace", 0.5)
 
 
 @pytest.fixture

@@ -11,19 +11,27 @@ explain the reasoning behind non-obvious changes instead of only making them.
 
 ## Layout
 
-- `src/harmony_mcp/config.py`: settings: the hub list (`config.json` `hubs`, or `HARMONY_HOSTS`)
-  and names; nothing secret
+- `src/harmony_mcp/config.py`: settings: the hub list (`config.json` `hubs`, or `HARMONY_HOSTS`),
+  names, `protocol`, `port` (simulator only), dry-run; validated into `Settings.problems`
 - `src/harmony_mcp/catalog.py`: the hub's config parsed into `Activity`/`Device`/`Command`;
   this is the allow-list. Pure data, no I/O
-- `src/harmony_mcp/client.py`: `HubClient`, one hub's long-lived connection plus pushed-state cache
-- `src/harmony_mcp/hubs.py`: `HubRegistry`, all the hubs, and the rule for which one a call means
-- `src/harmony_mcp/server.py`: MCP tools (`MCPServer` from `mcp` 2.x)
-- `src/harmony_mcp/cli.py`: `serve` (default), `check [--host]`
-- `tests/`: `conftest.py` (`FakeHarmonyAPI` per hub, `SAMPLE_CONFIG` and `DEN_CONFIG`, which
-  mirror the library's real shapes and share an activity name on purpose), `test_catalog`,
-  `test_config`, `test_client`, `test_tools` (in-process MCP `Client`, one hub),
-  `test_multi_hub` (two hubs), `test_cli`, `test_stdio` (installed entry point). Async tests
-  use anyio's plugin.
+- `src/harmony_mcp/client.py`: `HubClient`, one hub's long-lived connection plus pushed-state cache;
+  re-reads state after a reconnect; rate limits per hub
+- `src/harmony_mcp/hubs.py`: `HubRegistry`, all the hubs, the rule for which one a call means,
+  hub-qualified refs (`Den/Watch TV`), the first-call startup grace, bounded shutdown
+- `src/harmony_mcp/server.py`: MCP tools, resources and a prompt (`MCPServer` from `mcp` 2.x)
+- `src/harmony_mcp/assumptions.py`: every unverified protocol claim (id, source, confidence, status)
+- `src/harmony_mcp/limits.py`, `logsafe.py`, `remote.py` (shared with siblings, keep identical)
+- `src/harmony_mcp/discovery.py` (SSDP), `doctor.py`, `cli.py`: `serve` (default), `check`,
+  `call`, `discover`, `doctor`, `simulate`
+- `src/harmony_mcp/sim/fake_hub.py` + `fixtures/`: a wire-level fake hub (aiohttp) that the real
+  aioharmony talks to; used by tests *and* `simulate`
+- `tests/`: `conftest.py` (`FakeHarmonyAPI` per hub for fast unit tests, fixtures loaded from the
+  package; "Listen to Music" is on both hubs on purpose), `test_contract` (real aioharmony vs the
+  fake hub over sockets), `test_catalog`, `test_config`, `test_client`, `test_tools` (in-process
+  MCP `Client`), `test_multi_hub`, `test_safety`, `test_tooling`, `test_recorded` (replays
+  `doctor --dump` captures), `test_assumptions`, `test_cli`, `test_stdio`, `test_remote`. Async
+  tests use anyio's plugin.
 
 ## Rules for changes
 
@@ -42,7 +50,11 @@ explain the reasoning behind non-obvious changes instead of only making them.
 - Commands are refused (per hub) while `starting_id` is set (an activity's start/power-off
   sequence is running). Keep that guard: a press mid-sequence can hit a device still warming up.
 - Raise `HarmonyError` (a `ToolError`) for anything the model or user can act on.
-- Log to **stderr only**. stdout is the MCP stdio transport.
+- **Don't invent protocol details.** Anything not confirmed on hardware is an `Assumption`, cited
+  as `# ASSUMPTION <id>` where code depends on it, in README's table and HARDWARE_VALIDATION.md.
+  `test_assumptions` enforces it.
+- Log to **stderr only**, through `logsafe` (IPs and MACs redacted). stdout is the MCP stdio
+  transport.
 - Every tool has a `title`, explicit `ToolAnnotations`, and constrained args via
   `Annotated[..., Field(...)]`. `test_tools.py` enforces this. Nothing is destructive.
 
@@ -63,17 +75,24 @@ explain the reasoning behind non-obvious changes instead of only making them.
   how long the button is *held*; a bare float in the list is a pause. It returns only the
   presses the hub rejected (the hub is silent on success).
 - No type hints shipped (mypy override in pyproject).
+- The port is one module-level constant, `hubconnector_websocket.DEFAULT_HUB_PORT`, for every hub.
+  Anything that connects (registry, `check`, `doctor`) must apply `settings.port` to it.
+- After an automatic reconnect it does *not* re-read the current activity or config; `HubClient`
+  calls `refresh_info_from_hub()` itself (`_resync`).
+- At DEBUG it logs every payload sent and received (`call -v` / `doctor -v` show the frames).
 
 ## Status
 
-Untested on hardware. Cross-project fact from mcp-server-shieldtv: the hub is also the
-Shield's Bluetooth keyboard ("Harmony Keyboard"); after a Shield reboot it can be stuck, and
-the fix is power off then start the activity again.
+Verified against the simulator only. HARDWARE_VALIDATION.md is the checklist (`doctor` points at
+its step 3, so keep the numbering). Captures from `doctor --dump` go in
+`tests/fixtures/recorded/`. Cross-project fact from mcp-server-shieldtv: the hub is also the
+Shield's Bluetooth keyboard ("Harmony Keyboard"); after a Shield reboot it can be stuck, and the
+fix is power off then start the activity again (the `fix_stuck_remote` prompt).
 
 ## Commands
 
 ```sh
 pip install -e ".[dev]" && pytest && ruff check . && ruff format --check . && mypy
-mcp-server-harmony check --host <ip>   # once per hub; `check` alone rechecks all
-mcp-server-harmony   # serve
+mcp-server-harmony simulate --write-config /tmp/hcfg   # fake hubs on 127.0.0.1/.2
+mcp-server-harmony check --host <ip> | discover | doctor | call <tool> k=v | serve [--http]
 ```
