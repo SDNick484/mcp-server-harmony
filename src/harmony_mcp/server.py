@@ -58,6 +58,13 @@ def hubs() -> HubRegistry:
     return _hubs
 
 
+async def ready_hubs() -> HubRegistry:
+    """hubs(), but the first tool call after startup waits briefly for hubs still connecting."""
+    r = hubs()
+    await r.ready()
+    return r
+
+
 @asynccontextmanager
 async def lifespan(_server: MCPServer) -> AsyncIterator[None]:
     """Open every hub connection once at startup; close them at shutdown."""
@@ -163,29 +170,29 @@ def _result(h: HubClient, o: Outcome, done: str, unchanged: str) -> ActionResult
 
 # --- reads ------------------------------------------------------------------------------
 @mcp.tool(title="Get hub status", annotations=_READ)
-def get_status() -> HubsStatus:
+async def get_status() -> HubsStatus:
     """Start here. Lists every hub (one per TV) with whether it's reachable, on or off, and its running activity.
 
     transition is non-null while an activity is starting or powering off; that hub's commands wait until it
     clears. dry_run true means this server reports writes instead of sending them.
     """
-    r = hubs()
+    r = await ready_hubs()
     return {"dry_run": r.settings.dry_run, "hubs": [h.snapshot() for h in r.hubs]}
 
 
 @mcp.tool(title="List activities", annotations=_READ)
-def list_activities(hub: Hub = None) -> list[ActivityInfo]:
+async def list_activities(hub: Hub = None) -> list[ActivityInfo]:
     """List the activities on each hub (e.g. 'Watch Shield'), marking the running ones. Each has a ref usable
     anywhere an activity name is."""
     return [
         {"hub": h.name, "name": a.name, "ref": ref(h, a.name), "running": a.activity_id == h.activity_id}
-        for h in hubs().candidates(hub)
+        for h in (await ready_hubs()).candidates(hub)
         for a in h.catalog.activities
     ]
 
 
 @mcp.tool(title="List devices", annotations=_READ)
-def list_devices(hub: Hub = None) -> list[DeviceInfo]:
+async def list_devices(hub: Hub = None) -> list[DeviceInfo]:
     """List the devices each hub controls, with how many commands each knows. Use only when an activity
     doesn't cover what you need (send_command with device)."""
     return [
@@ -197,7 +204,7 @@ def list_devices(hub: Hub = None) -> list[DeviceInfo]:
             "model": d.model,
             "commands": len(d.commands),
         }
-        for h in hubs().candidates(hub)
+        for h in (await ready_hubs()).candidates(hub)
         for d in h.catalog.devices
     ]
 
@@ -209,13 +216,13 @@ Target = Annotated[
 
 
 @mcp.tool(title="List commands", annotations=_READ)
-def list_commands(target: Target = None, hub: Hub = None) -> CommandList:
+async def list_commands(target: Target = None, hub: Hub = None) -> CommandList:
     """List the commands send_command accepts for an activity or device (default: the running activity).
 
     Each entry says which device actually receives it. Activities expose the buttons they route; devices
     expose everything they know.
     """
-    h, source, commands = hubs().commands_for(target, hub)
+    h, source, commands = (await ready_hubs()).commands_for(target, hub)
     return {"hub": h.name, "source": source, "commands": _commands_view(h.catalog, commands)}
 
 
@@ -230,7 +237,7 @@ async def start_activity(
     Starting the activity that is already running does nothing (outcome 'unchanged'). Switching activities on
     the same hub needs no power_off first.
     """
-    h, a = hubs().activity(activity, hub)
+    h, a = (await ready_hubs()).activity(activity, hub)
     outcome = await h.start_activity(a)
     return _result(h, outcome, f"start {a.name} on {h.name}", f"{a.name} was already running on {h.name}")
 
@@ -247,7 +254,7 @@ async def power_off(
     With no hub and several hubs on, this asks which; hub='all' turns off every one and reports each hub
     separately (one unreachable hub doesn't stop the others).
     """
-    targets = hubs().to_power_off(hub)
+    targets = (await ready_hubs()).to_power_off(hub)
     results: list[ActionResult] = []
     for h in targets:
         try:
@@ -284,7 +291,7 @@ async def send_command(
     Without device, the running activity decides which device gets it. Names come from list_commands;
     there is no way to send a raw IR code. Rapid repeated calls are rate-limited per hub.
     """
-    r = hubs()
+    r = await ready_hubs()
     if device is None:
         h, act = r.running(hub)
         pool, where = act.commands, f"activity {act.name}"

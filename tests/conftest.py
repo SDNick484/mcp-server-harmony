@@ -12,6 +12,7 @@ from aioharmony.const import ClientCallbackType, SendCommandDevice, SendCommandR
 
 from harmony_mcp.client import HubClient
 from harmony_mcp.config import Settings, load_settings
+from harmony_mcp.hubs import HubRegistry
 from harmony_mcp.sim.fake_hub import load_fixture
 
 LIVING = "192.0.2.20"
@@ -131,6 +132,7 @@ def fast(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(HubClient, "activity_timeout", 0.2)
     monkeypatch.setattr(HubClient, "repeat_gap", 0.0)
     monkeypatch.setattr(HubClient, "retry_delay", 0.0)
+    monkeypatch.setattr(HubRegistry, "startup_grace", 0.5)
 
 
 @pytest.fixture

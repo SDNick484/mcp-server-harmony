@@ -1,10 +1,13 @@
-"""Entry point: `mcp-server-harmony [serve|check|discover|doctor|simulate]`.
+"""Entry point: `mcp-server-harmony [serve|check|call|discover|doctor|simulate]`.
 
 serve      speak MCP: stdio by default (the client launches it), or --http for
            a long-lived service behind Cloudflare Access (remote.py). --dry-run
            reads the hubs but sends nothing that changes anything.
 check      first contact with one hub (--host) or every configured one: list
            what it has and save it, with its own name, to config.json.
+call       call one tool exactly as the model would (through an in-process MCP
+           client, so arguments are validated the same way) and print the
+           result: `call start_activity activity="Den/Watch TV"`; `call tools`.
 discover   look for hubs with SSDP (discovery.py); `check --discover` adds them.
 doctor     check each hub layer by layer and say what failed (doctor.py);
            --dump writes redacted fixtures from your real hubs.
@@ -186,6 +189,37 @@ async def _cmd_simulate(args: argparse.Namespace, ready: asyncio.Event | None = 
             await f.stop()
 
 
+async def _cmd_call(args: argparse.Namespace) -> int:
+    from mcp import Client
+
+    from .server import mcp
+
+    tool_args: dict[str, object] = {}
+    for pair in args.args:
+        key, sep, raw = pair.partition("=")
+        if not sep:
+            print(f"arguments are key=value, got {pair!r}", file=sys.stderr)
+            return 2
+        try:
+            tool_args[key] = json.loads(raw)  # repeat=3 -> 3, hub=null -> None
+        except json.JSONDecodeError:
+            tool_args[key] = raw  # activity=Watch TV -> a string
+    async with Client(mcp) as c:
+        if args.tool == "tools":
+            for t in (await c.list_tools()).tools:
+                print(f"{t.name:<16} {(t.description or '').splitlines()[0]}")
+            return 0
+        result = await c.call_tool(args.tool, tool_args)
+    if result.is_error:
+        print(" ".join(getattr(part, "text", "") for part in result.content) or "error", file=sys.stderr)
+        return 1
+    body = result.structured_content
+    if isinstance(body, dict) and set(body) == {"result"}:
+        body = body["result"]
+    print(json.dumps(body, indent=2))
+    return 0
+
+
 # --- main ---------------------------------------------------------------------------------
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="mcp-server-harmony", description="MCP server for Logitech Harmony Hubs")
@@ -209,6 +243,10 @@ def build_parser() -> argparse.ArgumentParser:
     where = check.add_mutually_exclusive_group()
     where.add_argument("--host", help="A hub's IP address or hostname, to add it")
     where.add_argument("--discover", action="store_true", help="find hubs with SSDP first, then check and save each")
+    call = sub.add_parser("call", parents=[common], help="Call one tool as the model would and print the result")
+    call.add_argument("tool", help="tool name, or 'tools' to list them")
+    call.add_argument("args", nargs="*", metavar="key=value", help="tool arguments (values are JSON if they parse)")
+    call.add_argument("--dry-run", action="store_true", help="send nothing that changes anything")
     disc = sub.add_parser("discover", parents=[common], help="Look for hubs on the LAN with SSDP")
     disc.add_argument("--timeout", type=float, default=3.0)
     disc.add_argument("--st", default="urn:myharmony-com:device:harmony:1", help="search target (try ssdp:all)")
@@ -231,11 +269,15 @@ def main(argv: list[str] | None = None) -> None:
     parser = build_parser()
     args = parser.parse_args(argv)
 
-    if args.cmd in ("check", "discover", "doctor", "simulate"):
+    if args.cmd in ("check", "call", "discover", "doctor", "simulate"):
         _setup_logging(args, default=logging.WARNING)
+        if getattr(args, "dry_run", False):
+            os.environ["HARMONY_DRY_RUN"] = "1"
         with contextlib.suppress(KeyboardInterrupt):
             if args.cmd == "check":
                 sys.exit(asyncio.run(_cmd_check(args.host, args.discover)))
+            if args.cmd == "call":
+                sys.exit(asyncio.run(_cmd_call(args)))
             if args.cmd == "discover":
                 sys.exit(asyncio.run(_cmd_discover(args.timeout, args.st, args.raw)))
             if args.cmd == "doctor":

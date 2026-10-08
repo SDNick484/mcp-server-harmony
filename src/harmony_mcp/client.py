@@ -131,6 +131,8 @@ class HubClient:
         self._task: asyncio.Task[None] | None = None
         self._resync_task: asyncio.Task[None] | None = None
         self.available = False
+        # Set once the first connection attempt has finished, either way (HubRegistry.ready waits on it).
+        self.tried = asyncio.Event()
         self.activity_id: int | None = None
         self.starting_id: int | None = None
         self.catalog = Catalog()
@@ -201,6 +203,7 @@ class HubClient:
             except (HarmonyException, OSError, TimeoutError) as exc:
                 reason = str(exc) or type(exc).__name__
             log.info("Harmony hub %s unreachable (%s); retrying in %.0fs", self.name, reason, delay)
+            self.tried.set()
             await asyncio.sleep(delay)
             delay = min(delay * 2, 60.0)
 
@@ -208,6 +211,7 @@ class HubClient:
         self.catalog = Catalog.from_config(api.config)
         self.activity_id = api.current_activity[0]
         self.available = True
+        self.tried.set()
         log.info(
             "Connected to %s at %s: %d activities, %d devices",
             self.name,

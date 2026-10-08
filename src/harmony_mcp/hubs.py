@@ -51,8 +51,14 @@ def ref(hub: HubClient, name: str) -> str:
 
 
 class HubRegistry:
+    # A client may call a tool the moment it launches us (get_status at startup, `call`), while the hubs
+    # are still connecting. The first call waits up to this long for each hub's first attempt to finish,
+    # once; later calls never wait, so a hub that drops is reported at once.
+    startup_grace = 5.0
+
     def __init__(self, settings: Settings, api_factory: ApiFactory = HarmonyAPI) -> None:
         self.settings = settings
+        self._ready_checked = False
         self.hubs = [HubClient(h, settings.protocol, api_factory, dry_run=settings.dry_run) for h in settings.hubs]
         if settings.port is not None:
             # aioharmony has one module-level port for every hub (ASSUMPTION
@@ -66,6 +72,17 @@ class HubRegistry:
             log.warning("DRY RUN: hubs are read, but nothing that changes anything is sent.")
         for h in self.hubs:
             await h.start()
+
+    async def ready(self) -> None:
+        """On the first call only: let hubs still on their first connection attempt finish it."""
+        if self._ready_checked:
+            return
+        self._ready_checked = True
+        pending = [h.tried.wait() for h in self.hubs if not h.tried.is_set()]
+        if pending:
+            with contextlib.suppress(TimeoutError):
+                async with asyncio.timeout(self.startup_grace):
+                    await asyncio.gather(*pending)
 
     async def stop(self) -> None:
         """Close every hub, giving each a bounded time so one wedged hub can't hang shutdown."""

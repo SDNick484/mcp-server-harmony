@@ -15,6 +15,7 @@ from harmony_mcp import cli
 from harmony_mcp.config import load_settings
 from harmony_mcp.discovery import discover, parse_reply
 from harmony_mcp.doctor import render, run_doctor, to_json
+from harmony_mcp.hubs import HubRegistry
 from harmony_mcp.logsafe import RedactingFormatter, redact
 from harmony_mcp.sim.fake_hub import FakeHub, load_fixture
 
@@ -188,3 +189,48 @@ async def test_simulate_writes_a_config_the_server_can_use(tmp_path, monkeypatch
         sim.cancel()
         with pytest.raises(asyncio.CancelledError):
             await sim
+
+
+async def test_call_against_the_simulator(tmp_path, monkeypatch, capsys):
+    """`call` runs one tool through the MCP layer, and its first call waits for hubs still connecting."""
+    port = free_port_on("127.0.0.1")
+    args = argparse.Namespace(hubs=1, port=port, step_delay=0.0, write_config=str(tmp_path), flaky=None)
+    ready = asyncio.Event()
+    sim = asyncio.ensure_future(cli._cmd_simulate(args, ready))
+    await asyncio.wait_for(ready.wait(), 5)
+    monkeypatch.setenv("HARMONY_CONFIG_DIR", str(tmp_path))
+    monkeypatch.delenv("HARMONY_HOSTS", raising=False)
+    monkeypatch.delenv("HARMONY_HOST", raising=False)
+    monkeypatch.setattr(HubRegistry, "startup_grace", 5.0)
+    try:
+        capsys.readouterr()
+
+        def call(*argv: str) -> argparse.Namespace:
+            return cli.build_parser().parse_args(["call", *argv])
+
+        assert await cli._cmd_call(call("get_status")) == 0  # no waiting here: the grace does it
+        assert json.loads(capsys.readouterr().out)["hubs"][0]["reachable"] is True
+        assert await cli._cmd_call(call("start_activity", "activity=Watch Shield")) == 0
+        assert json.loads(capsys.readouterr().out)["outcome"] == "done"
+        assert await cli._cmd_call(call("send_command", "command=VolumeUp", "repeat=11")) == 1
+        assert "repeat" in capsys.readouterr().err  # validated like a model's call
+        assert await cli._cmd_call(call("tools")) == 0
+        assert "start_activity" in capsys.readouterr().out
+    finally:
+        sim.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await sim
+
+
+async def test_later_calls_dont_wait_for_an_offline_hub(monkeypatch):
+    from harmony_mcp.config import HubSettings, Settings
+
+    reg = HubRegistry(Settings(hubs=(HubSettings("192.0.2.9"),)))  # never started: never tries
+    monkeypatch.setattr(HubRegistry, "startup_grace", 0.2)
+    loop = asyncio.get_running_loop()
+    t = loop.time()
+    await reg.ready()  # the first call waits out the grace...
+    assert 0.15 < loop.time() - t < 1
+    t = loop.time()
+    await reg.ready()  # ...later ones don't
+    assert loop.time() - t < 0.05
