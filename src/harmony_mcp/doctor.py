@@ -218,6 +218,10 @@ async def check_hub(hub: HubSettings, settings: Settings, timeout: float, dump_d
 
 
 async def run_doctor(settings: Settings, timeout: float = 10.0, dump_dir: Path | None = None) -> Report:
+    if settings.port is not None:
+        # aioharmony has one module-level port (ASSUMPTION H-PORT); the tcp and provision steps use
+        # settings.port, so the connect step must too (only the simulator ever sets it).
+        ws_connector.DEFAULT_HUB_PORT = settings.port
     hub_reports = [await check_hub(h, settings, timeout, dump_dir) for h in settings.hubs]
     warnings: list[str] = []
     if not settings.hubs:

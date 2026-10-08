@@ -102,7 +102,9 @@ async def fake_on_config(config_dir, monkeypatch):
     hub = FakeHub(load_fixture("living_room"), name="Living Room", port=port)
     await hub.start()
     (config_dir / "config.json").write_text(json.dumps({"hubs": ["127.0.0.1"], "port": port, "protocol": "WEBSOCKETS"}))
-    monkeypatch.setattr(ws_connector, "DEFAULT_HUB_PORT", port)
+    # Not set to `port` here: run_doctor must apply config.json's port itself (it once didn't, and every
+    # step but `connect` used the right port). This only restores the module's value afterwards.
+    monkeypatch.setattr(ws_connector, "DEFAULT_HUB_PORT", ws_connector.DEFAULT_HUB_PORT)
     yield hub
     await hub.stop()
 
