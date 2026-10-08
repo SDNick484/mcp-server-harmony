@@ -1,0 +1,56 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mcp-server-harmony"
+version = "0.1.0"
+description = "MCP server for the Logitech Harmony Hub (local websocket API), activity-first and allow-listed by the hub's own config"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "Nicholas E. Andrade" }]
+requires-python = ">=3.11"
+keywords = ["mcp", "mcp-server", "harmony", "logitech-harmony", "harmony-hub", "home-automation"]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Home Automation",
+]
+dependencies = [
+    "mcp>=2.3,<3",
+    "aioharmony>=1.0.10,<2",
+    "typing_extensions>=4.7",
+]
+
+[project.urls]
+Homepage = "https://github.com/SDNick484/mcp-server-harmony"
+Issues = "https://github.com/SDNick484/mcp-server-harmony/issues"
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "anyio>=4", "ruff>=0.6", "mypy>=1.11"]
+
+[project.scripts]
+mcp-server-harmony = "harmony_mcp.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+# pycodestyle, pyflakes, isort, pyupgrade, bugbear, simplify
+select = ["E", "W", "F", "I", "UP", "B", "SIM"]
+
+[tool.mypy]
+files = ["src"]
+strict = true
+
+[[tool.mypy.overrides]]
+module = ["aioharmony.*"]  # ships no type hints (no py.typed)
+ignore_missing_imports = true
