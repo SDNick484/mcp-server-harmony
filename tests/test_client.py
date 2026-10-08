@@ -60,7 +60,7 @@ async def test_offline_hub_errors_name_it(fake):
 
 async def test_start_activity_tracks_state(hub, fake):
     a = hub.catalog.activity("Watch Shield")
-    assert await hub.start_activity(a) is True
+    assert (await hub.start_activity(a)).changed is True
     assert fake.started == [WATCH_SHIELD]
     snap = hub.snapshot()
     assert snap["current_activity"] == {"id": WATCH_SHIELD, "name": "Watch Shield"}
@@ -70,14 +70,14 @@ async def test_start_activity_tracks_state(hub, fake):
 async def test_starting_the_running_activity_sends_nothing(hub, fake):
     fake.activity_id = WATCH_SHIELD
     hub.activity_id = WATCH_SHIELD
-    assert await hub.start_activity(hub.catalog.activity("Watch Shield")) is False
+    assert (await hub.start_activity(hub.catalog.activity("Watch Shield"))).changed is False
     assert fake.started == []
 
 
 async def test_power_off_is_idempotent(hub, fake):
-    assert await hub.power_off() is False  # already off at start
+    assert (await hub.power_off()).changed is False  # already off at start
     hub.activity_id = WATCH_SHIELD
-    assert await hub.power_off() is True
+    assert (await hub.power_off()).changed is True
     assert fake.started == [-1]
 
 

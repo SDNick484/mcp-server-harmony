@@ -9,14 +9,24 @@ wrong room's TV.
 
 A hub that hasn't connected yet has an empty catalog, so its activities are
 unknown. Errors say so rather than claiming the name doesn't exist.
+
+Hub-qualified references: anywhere a tool takes an activity or device name, it
+also takes "<hub>/<name>" ("Den/Listen to Music"), which is what the list
+tools return as ``ref``. That lets the model copy one string instead of
+pairing a name with a hub argument. If a name itself contains "/" and also
+reads as a qualified reference, the call is refused as ambiguous rather than
+guessed.
 """
 
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import logging
 from collections.abc import Callable
 from typing import TypeVar
 
+import aioharmony.hubconnector_websocket as ws_connector
 from aioharmony.harmonyapi import HarmonyAPI
 
 from .catalog import Activity, Command, Device
@@ -24,6 +34,9 @@ from .client import ApiFactory, HarmonyError, HubClient
 from .config import Settings
 
 T = TypeVar("T")
+log = logging.getLogger(__name__)
+
+STOP_TIMEOUT = 5.0  # seconds per hub to close its connection at shutdown
 
 ALL = "all"
 
@@ -32,16 +45,40 @@ def _list(items: list[str]) -> str:
     return ", ".join(items) if items else "(none)"
 
 
+def ref(hub: HubClient, name: str) -> str:
+    """The hub-qualified reference the list tools return, e.g. "Den/Watch TV"."""
+    return f"{hub.name}/{name}"
+
+
 class HubRegistry:
     def __init__(self, settings: Settings, api_factory: ApiFactory = HarmonyAPI) -> None:
-        self.hubs = [HubClient(h, settings.protocol, api_factory) for h in settings.hubs]
+        self.settings = settings
+        self.hubs = [HubClient(h, settings.protocol, api_factory, dry_run=settings.dry_run) for h in settings.hubs]
+        if settings.port is not None:
+            # aioharmony has one module-level port for every hub (ASSUMPTION
+            # H-PORT); only the simulator ever needs another one.
+            ws_connector.DEFAULT_HUB_PORT = settings.port
 
     async def start(self) -> None:
+        for problem in self.settings.problems:
+            log.warning("Config: %s", problem)
+        if self.settings.dry_run:
+            log.warning("DRY RUN: hubs are read, but nothing that changes anything is sent.")
         for h in self.hubs:
             await h.start()
 
     async def stop(self) -> None:
-        await asyncio.gather(*(h.stop() for h in self.hubs))
+        """Close every hub, giving each a bounded time so one wedged hub can't hang shutdown."""
+
+        async def stop_one(h: HubClient) -> None:
+            try:
+                async with asyncio.timeout(STOP_TIMEOUT):
+                    await h.stop()
+            except TimeoutError:
+                log.warning("%s: didn't close within %.0fs; abandoning it", h.name, STOP_TIMEOUT)
+
+        with contextlib.suppress(Exception):
+            await asyncio.gather(*(stop_one(h) for h in self.hubs))
 
     # --- choosing hubs -------------------------------------------------------------
     def names(self) -> str:
@@ -83,8 +120,31 @@ class HubRegistry:
         per_hub = "; ".join(f"{h.name}: {_list(known(h))}" for h in pool)
         raise HarmonyError(f"Unknown {kind} {wanted!r}. {per_hub}.{self._offline_note(pool)}")
 
+    # --- hub-qualified references ------------------------------------------------
+    def qualify(self, name: str, hub: str | None, exists: Callable[[HubClient, str], bool]) -> tuple[str, str | None]:
+        """Split "Den/Watch TV" into ("Watch TV", "Den") when "Den" names a hub.
+
+        `exists(hub, name)` says whether a hub has an item by that exact name;
+        it decides the ambiguous case of a name that itself contains "/".
+        """
+        prefix, sep, rest = name.partition("/")
+        if not sep or not rest.strip():
+            return name, hub
+        named = [h for h in self.hubs if h.answers_to(prefix)]
+        if not named:
+            return name, hub
+        if any(exists(h, name) for h in self.hubs):
+            raise HarmonyError(
+                f"{name!r} could be the name itself or {rest.strip()!r} on {named[0].name}; "
+                "pass the name and hub separately."
+            )
+        if hub is not None and not named[0].answers_to(hub):
+            raise HarmonyError(f"{name!r} names hub {named[0].name}, but hub={hub!r} was also given.")
+        return rest.strip(), prefix.strip()
+
     # --- lookups -----------------------------------------------------------------
     def activity(self, name: str, hub: str | None) -> tuple[HubClient, Activity]:
+        name, hub = self.qualify(name, hub, lambda h, n: h.catalog.activity(n) is not None)
         return self._one(
             self.candidates(hub),
             lambda h: h.catalog.activity(name),
@@ -94,6 +154,7 @@ class HubRegistry:
         )
 
     def device(self, name: str, hub: str | None) -> tuple[HubClient, Device]:
+        name, hub = self.qualify(name, hub, lambda h, n: h.catalog.device(n) is not None)
         return self._one(
             self.candidates(hub),
             lambda h: h.catalog.device(name),
@@ -111,6 +172,9 @@ class HubRegistry:
         if target is None:
             running_hub, running = self.running(hub)
             return running_hub, f"activity {running.name}", running.commands
+        target, hub = self.qualify(
+            target, hub, lambda h, n: h.catalog.activity(n) is not None or h.catalog.device(n) is not None
+        )
         pool = self.candidates(hub)
         hits: list[tuple[HubClient, str, tuple[Command, ...]]] = []
         for h in pool:

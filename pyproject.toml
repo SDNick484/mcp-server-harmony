@@ -20,6 +20,7 @@ classifiers = [
 dependencies = [
     "mcp>=2.3,<3",
     "aioharmony>=1.0.10,<2",
+    "aiohttp>=3.9",          # already required by aioharmony; used directly by the fake hub and doctor
     "pyjwt[crypto]>=2.10",   # verifying Cloudflare Access assertions (remote.py)
     "uvicorn>=0.31",         # the HTTP transport (remote.py)
     "typing_extensions>=4.7",
@@ -38,8 +39,16 @@ mcp-server-harmony = "harmony_mcp.cli:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+"harmony_mcp.sim" = ["fixtures/*.json"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+filterwarnings = [
+    # aioharmony's own aiohttp usage; nothing we can fix here.
+    "ignore:enable_cleanup_closed ignored:DeprecationWarning",
+    "ignore:verify_ssl is deprecated:DeprecationWarning",
+]
 
 [tool.ruff]
 line-length = 120

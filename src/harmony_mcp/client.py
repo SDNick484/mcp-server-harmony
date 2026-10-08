@@ -18,6 +18,7 @@ import asyncio
 import contextlib
 import logging
 from collections.abc import Callable
+from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from aioharmony.const import ClientCallbackType, SendCommandDevice
@@ -28,6 +29,18 @@ from typing_extensions import TypedDict
 
 from .catalog import POWER_OFF_ID, Activity, Catalog, Command, norm
 from .config import HubSettings, Protocol
+from .limits import (
+    ACTIVITY_CAPACITY,
+    ACTIVITY_RATE,
+    MAX_CALL_SECONDS,
+    MAX_DELAY_MS,
+    MAX_HOLD_MS,
+    MAX_REPEAT,
+    MIN_DELAY_MS,
+    PRESS_CAPACITY,
+    PRESS_RATE,
+    TokenBucket,
+)
 
 log = logging.getLogger(__name__)
 
@@ -58,6 +71,15 @@ class Status(TypedDict):
     # Non-null while the hub runs an activity's start or power-off sequence;
     # commands are refused until it clears.
     transition: str | None
+
+
+@dataclass(frozen=True)
+class Outcome:
+    """What a write did. ``sent`` describes each protocol frame (sent, or that would be in dry-run)."""
+
+    changed: bool
+    dry_run: bool = False
+    sent: list[str] = field(default_factory=list)
 
 
 # Builds the library's API object. Normally HarmonyAPI itself; tests pass a fake.
@@ -92,13 +114,22 @@ class HubClient:
     retry_delay = 1.0
 
     def __init__(
-        self, hub: HubSettings, protocol: Protocol | None = None, api_factory: ApiFactory = HarmonyAPI
+        self,
+        hub: HubSettings,
+        protocol: Protocol | None = None,
+        api_factory: ApiFactory = HarmonyAPI,
+        *,
+        dry_run: bool = False,
     ) -> None:
         self.hub = hub
         self.protocol = protocol
+        self.dry_run = dry_run
+        self.press_bucket = TokenBucket(PRESS_CAPACITY, PRESS_RATE)
+        self.activity_bucket = TokenBucket(ACTIVITY_CAPACITY, ACTIVITY_RATE)
         self._api_factory = api_factory
         self._api: Any = None
         self._task: asyncio.Task[None] | None = None
+        self._resync_task: asyncio.Task[None] | None = None
         self.available = False
         self.activity_id: int | None = None
         self.starting_id: int | None = None
@@ -132,10 +163,11 @@ class HubClient:
         self._task = asyncio.create_task(self._connect_forever(), name="harmony-connect")
 
     async def stop(self) -> None:
-        if self._task:
-            self._task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await self._task
+        for task in (self._task, self._resync_task):
+            if task is not None:
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
         if self._api is not None:
             with contextlib.suppress(Exception):
                 await self._api.close()
@@ -186,7 +218,39 @@ class HubClient:
 
     # --- callbacks (called by aioharmony with one argument) -------------------
     def _on_connect(self, _ip: object) -> None:
+        # aioharmony calls this on the first connect (before _connect has set
+        # self._api) and again after each automatic reconnect.
+        reconnected = self._api is not None and not self.available
         self.available = True
+        if reconnected and (self._resync_task is None or self._resync_task.done()):
+            self._resync_task = asyncio.ensure_future(self._resync())
+
+    async def _resync(self) -> None:
+        """Re-read config and current activity after a reconnect.
+
+        While the socket was down the hub may have changed activity (someone
+        used the remote), and a start that was in flight lost its replies, so
+        the hub can be on an activity we reported as failed. aioharmony only
+        reads state in connect(), not when its connector reconnects on its
+        own, so we do it here.
+
+        There's no public HarmonyAPI call for this; refresh_info_from_hub
+        lives on the HarmonyClient behind HarmonyAPI._harmony_client.
+        test_contract.py::test_recovers_from_a_malformed_frame pins it, so an
+        aioharmony upgrade that moves it fails loudly instead of silently.
+        """
+        inner = getattr(self._api, "_harmony_client", None)
+        if inner is None:
+            return
+        try:
+            await inner.refresh_info_from_hub()
+        except Exception as exc:  # the next reconnect or notification will try again
+            log.warning("%s: couldn't refresh state after reconnecting: %s", self.name, exc)
+            return
+        self.catalog = Catalog.from_config(self._api.config)
+        self.activity_id = self._api.current_activity[0]
+        self.starting_id = None
+        log.info("%s: state refreshed after reconnect", self.name)
 
     def _on_disconnect(self, _ip: object) -> None:
         self.available = False
@@ -225,28 +289,42 @@ class HubClient:
             raise HarmonyError(f"{self.name} is busy {what}; {doing} once it finishes (check get_status).")
         return api
 
-    async def start_activity(self, activity: Activity) -> bool:
+    def _limit(self, bucket: TokenBucket, n: int, what: str) -> None:
+        wait = bucket.take(n)
+        if wait:
+            when = "it's more than the limit allows at once" if wait == float("inf") else f"try again in {wait:.0f}s"
+            raise HarmonyError(
+                f"Rate limit on {self.name}: refusing to {what} ({when}). This guards against runaway loops; "
+                "if this is deliberate, wait and retry."
+            )
+
+    async def start_activity(self, activity: Activity) -> Outcome:
         """Start an activity and wait until the hub says it's done.
 
-        Returns False when it was already running (nothing sent): Harmony
+        Unchanged (nothing sent) when it was already running: Harmony
         activities are states, so starting the current one is a no-op, which is
         what makes the tool idempotent.
         """
         api = self._require_idle(f"start {activity.name}")
         if self.activity_id == activity.activity_id:
-            return False
-        await self._run_activity(api, activity.activity_id, activity.name)
-        return True
+            return Outcome(changed=False)
+        self._limit(self.activity_bucket, 1, f"start {activity.name}")
+        return await self._run_activity(api, activity.activity_id, activity.name)
 
-    async def power_off(self) -> bool:
-        """Run the hub's power-off sequence. False when everything is already off."""
+    async def power_off(self) -> Outcome:
+        """Run the hub's power-off sequence. Unchanged when everything is already off."""
         api = self._require_idle("power off")
         if self.activity_id == POWER_OFF_ID:
-            return False
-        await self._run_activity(api, POWER_OFF_ID, "power off")
-        return True
+            return Outcome(changed=False)
+        self._limit(self.activity_bucket, 1, "power off")
+        return await self._run_activity(api, POWER_OFF_ID, "power off")
 
-    async def _run_activity(self, api: Any, activity_id: int, what: str) -> None:
+    async def _run_activity(self, api: Any, activity_id: int, what: str) -> Outcome:
+        # The frame aioharmony sends for this (harmonyclient.start_activity).
+        sent = [f"runactivity activityId={activity_id} ({what})"]
+        if self.dry_run:
+            log.info("[dry-run] %s: would send %s", self.name, sent[0])
+            return Outcome(changed=False, dry_run=True, sent=sent)
         try:
             async with asyncio.timeout(self.activity_timeout):
                 ok, msg = await api.start_activity(activity_id)
@@ -261,23 +339,50 @@ class HubClient:
         # returns, but don't depend on callback ordering for our own state.
         self.activity_id = activity_id
         self.starting_id = None
+        return Outcome(changed=True, sent=sent)
 
-    async def send(self, command: Command, repeat: int = 1) -> None:
-        """Press a command `repeat` times. The hub only replies when a press fails."""
+    async def send(self, command: Command, repeat: int = 1, hold_ms: int = 0, delay_ms: int | None = None) -> Outcome:
+        """Press a command `repeat` times. The hub only replies when a press fails (ASSUMPTION H-PRESS-SILENT).
+
+        hold_ms: how long each press is held before release. aioharmony's
+            SendCommandDevice.delay is exactly that: it sends press, sleeps,
+            sends release (ASSUMPTION H-HOLD for what the hub does meanwhile).
+        delay_ms: pause between repeats (default repeat_gap). A bare float in
+            aioharmony's command list is a pause.
+        """
         api = self._require_idle(f"send {command.name}")
-        press = SendCommandDevice(device=command.device_id, command=command.name, delay=0)
+        gap_ms = round(self.repeat_gap * 1000) if delay_ms is None else delay_ms
+        if not 0 <= hold_ms <= MAX_HOLD_MS:
+            raise HarmonyError(f"hold_ms must be 0-{MAX_HOLD_MS}.")
+        # Only a caller's delay_ms is range-checked; the default is ours to choose.
+        if delay_ms is not None and not MIN_DELAY_MS <= delay_ms <= MAX_DELAY_MS:
+            raise HarmonyError(f"delay_ms must be {MIN_DELAY_MS}-{MAX_DELAY_MS}.")
+        if not 1 <= repeat <= MAX_REPEAT:
+            raise HarmonyError(f"repeat must be 1-{MAX_REPEAT}.")
+        total = (repeat * hold_ms + (repeat - 1) * gap_ms) / 1000
+        if total > MAX_CALL_SECONDS:
+            raise HarmonyError(
+                f"That would take {total:.1f}s ({repeat} x {hold_ms} ms held, {gap_ms} ms apart); the limit is "
+                f"{MAX_CALL_SECONDS:.0f}s per call. Use fewer repeats or a shorter hold."
+            )
+        self._limit(self.press_bucket, repeat, f"press {command.name} x{repeat}")
+        device = self.catalog.device_name(command.device_id)
+        held = f", held {hold_ms} ms" if hold_ms else ""
+        sent = [f"holdAction press+release {device}/{command.name}{held}"] * repeat
+        if self.dry_run:
+            log.info("[dry-run] %s: would send %s x%d", self.name, sent[0], repeat)
+            return Outcome(changed=False, dry_run=True, sent=sent)
+        press = SendCommandDevice(device=command.device_id, command=command.name, delay=hold_ms / 1000)
         sequence: list[Any] = []
         for i in range(repeat):
             if i:
-                sequence.append(self.repeat_gap)  # a bare float is a pause in aioharmony
+                sequence.append(gap_ms / 1000)
             sequence.append(press)
         errors = await api.send_commands(sequence)
         if errors:
             e = errors[0]
-            raise HarmonyError(
-                f"{self.name} rejected {command.name} for {self.catalog.device_name(command.device_id)}: "
-                f"{e.msg} (code {e.code})"
-            )
+            raise HarmonyError(f"{self.name} rejected {command.name} for {device}: {e.msg} (code {e.code})")
+        return Outcome(changed=True, sent=sent)
 
     # --- reporting -----------------------------------------------------------
     def _name(self, activity_id: int | None) -> str:

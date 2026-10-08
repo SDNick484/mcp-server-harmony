@@ -1,0 +1,133 @@
+{
+ "_comment": "Hand-built in the shape of HarmonyAPI.config (string ids, JSON-string actions). NOT recorded from a hub; see assumptions H-CONFIG-SHAPE. Replace or extend with `mcp-server-harmony doctor --dump`.",
+ "activity": [
+  {
+   "id": "-1",
+   "label": "PowerOff",
+   "controlGroup": []
+  },
+  {
+   "id": "38000001",
+   "label": "Watch Shield",
+   "controlGroup": [
+    {
+     "name": "Volume",
+     "function": [
+      {
+       "name": "VolumeUp",
+       "label": "Volume Up",
+       "action": "{\"command\": \"VolumeUp\", \"type\": \"IRCommand\", \"deviceId\": \"71000001\"}"
+      },
+      {
+       "name": "Mute",
+       "label": "Mute",
+       "action": "{\"command\": \"Mute\", \"type\": \"IRCommand\", \"deviceId\": \"71000001\"}"
+      }
+     ]
+    },
+    {
+     "name": "TransportBasic",
+     "function": [
+      {
+       "name": "Pause",
+       "label": "Pause",
+       "action": "{\"command\": \"Pause\", \"type\": \"IRCommand\", \"deviceId\": \"71000002\"}"
+      },
+      {
+       "name": "Play",
+       "label": "Play",
+       "action": "{\"command\": \"Play\", \"type\": \"IRCommand\", \"deviceId\": \"71000002\"}"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "38000002",
+   "label": "Listen to Music",
+   "controlGroup": [
+    {
+     "name": "Volume",
+     "function": [
+      {
+       "name": "VolumeUp",
+       "label": "Volume Up",
+       "action": "{\"command\": \"VolumeUp\", \"type\": \"IRCommand\", \"deviceId\": \"71000001\"}"
+      }
+     ]
+    }
+   ]
+  }
+ ],
+ "device": [
+  {
+   "id": "71000001",
+   "label": "Onkyo AV Receiver",
+   "manufacturer": "Onkyo",
+   "model": "TX-NR7100",
+   "controlGroup": [
+    {
+     "name": "Power",
+     "function": [
+      {
+       "name": "PowerOn",
+       "label": "Power On",
+       "action": "{\"command\": \"PowerOn\", \"type\": \"IRCommand\", \"deviceId\": \"71000001\"}"
+      },
+      {
+       "name": "PowerOff",
+       "label": "Power Off",
+       "action": "{\"command\": \"PowerOff\", \"type\": \"IRCommand\", \"deviceId\": \"71000001\"}"
+      }
+     ]
+    },
+    {
+     "name": "Volume",
+     "function": [
+      {
+       "name": "VolumeUp",
+       "label": "Volume Up",
+       "action": "{\"command\": \"VolumeUp\", \"type\": \"IRCommand\", \"deviceId\": \"71000001\"}"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "71000002",
+   "label": "NVIDIA Shield",
+   "manufacturer": "NVIDIA",
+   "model": "Shield TV",
+   "controlGroup": [
+    {
+     "name": "TransportBasic",
+     "function": [
+      {
+       "name": "Pause",
+       "label": "Pause",
+       "action": "{\"command\": \"Pause\", \"type\": \"IRCommand\", \"deviceId\": \"71000002\"}"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "71000003",
+   "label": "Living Room TV",
+   "manufacturer": "LG",
+   "model": "OLED65",
+   "controlGroup": [
+    {
+     "name": "Power",
+     "function": [
+      {
+       "name": "PowerToggle",
+       "label": "Power Toggle",
+       "action": "{\"command\": \"PowerToggle\", \"type\": \"IRCommand\", \"deviceId\": \"71000003\"}"
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}
