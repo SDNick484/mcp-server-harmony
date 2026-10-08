@@ -20,6 +20,8 @@ classifiers = [
 dependencies = [
     "mcp>=2.3,<3",
     "aioharmony>=1.0.10,<2",
+    "pyjwt[crypto]>=2.10",   # verifying Cloudflare Access assertions (remote.py)
+    "uvicorn>=0.31",         # the HTTP transport (remote.py)
     "typing_extensions>=4.7",
 ]
 
@@ -28,7 +30,7 @@ Homepage = "https://github.com/SDNick484/mcp-server-harmony"
 Issues = "https://github.com/SDNick484/mcp-server-harmony/issues"
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "anyio>=4", "ruff>=0.6", "mypy>=1.11"]
+dev = ["pytest>=8", "anyio>=4", "ruff>=0.6", "mypy>=1.11", "httpx2"]
 
 [project.scripts]
 mcp-server-harmony = "harmony_mcp.cli:main"

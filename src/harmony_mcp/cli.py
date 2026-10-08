@@ -1,5 +1,9 @@
 """Entry point: `mcp-server-harmony` (serve) and `mcp-server-harmony check [--host IP]`.
 
+`serve` speaks stdio by default (the client launches it). `serve --http` runs it
+as a long-lived HTTP service instead, for an LXC behind Cloudflare Access; see
+remote.py and the README's "Run it as a service".
+
 There is no pairing step: a Harmony hub answers anyone on the LAN. `check` is
 the first-contact tool instead. With --host it connects to that hub, prints
 what it has (the names the model will use), and adds it to config.json along
@@ -17,7 +21,7 @@ import sys
 from aioharmony.exceptions import HarmonyException
 from aioharmony.harmonyapi import HarmonyAPI
 
-from . import __version__
+from . import __version__, remote
 from .catalog import Catalog
 from .config import Protocol, load_settings, save_hub
 
@@ -70,7 +74,8 @@ def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="mcp-server-harmony", description="MCP server for Logitech Harmony Hubs")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     sub = parser.add_subparsers(dest="cmd")
-    sub.add_parser("serve", help="Run the MCP server over stdio (default)")
+    serve = sub.add_parser("serve", help="Run the MCP server (stdio by default, or --http)")
+    remote.add_http_arguments(serve, default_port=8713, default_path="/harmony/mcp")
     check = sub.add_parser("check", help="Connect to a hub (or every configured hub), list it, and save it")
     check.add_argument("--host", help="A hub's IP address or hostname, to add it")
     args = parser.parse_args(argv)
@@ -83,4 +88,10 @@ def main(argv: list[str] | None = None) -> None:
     # Imported here so `check` doesn't pay for the MCP server's imports.
     from .server import mcp
 
-    mcp.run()  # stdio transport by default
+    if getattr(args, "http", False):
+        try:
+            remote.serve_http(mcp, remote.http_config(args))
+        except remote.ConfigError as exc:
+            parser.exit(2, f"mcp-server-harmony: {exc}\n")
+    else:
+        mcp.run()  # stdio: JSON-RPC over stdin/stdout
