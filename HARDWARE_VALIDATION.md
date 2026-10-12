@@ -84,7 +84,7 @@ A `WARN Activity '<name>' exists on Living Room and Den` line is fine. It means 
 ask which hub, or take `Den/<name>`.
 
 If `connect` fails after `provision` passed, rerun with the frames visible and keep the output
-(it isn't redacted, so look it over before sharing):
+(addresses aren't redacted, so look it over before sharing; secrets still are):
 
 ```sh
 mcp-server-harmony doctor -v --no-redact 2> doctor-debug.log

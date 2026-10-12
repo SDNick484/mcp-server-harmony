@@ -101,7 +101,8 @@ CF_ACCESS_TEAM_DOMAIN=<team>.cloudflareaccess.com CF_ACCESS_AUD=<aud tag> \
 ```
 
 Every request must carry a valid Access JWT (`Cf-Access-Jwt-Assertion`). The checks and the
-flags are documented in `src/harmony_mcp/remote.py`.
+flags are documented in `src/harmony_mcp/remote.py`. The Host-header (DNS-rebinding) checks stay on
+even with `--bind 0.0.0.0`: for LAN clients, also pass `--public-host <this machine's LAN IP>`.
 
 ## Configuration
 
@@ -110,7 +111,7 @@ flags are documented in `src/harmony_mcp/remote.py`.
 | `HARMONY_HOSTS`          | *(from `config.json`)*                | Comma-separated hub addresses; replaces the file's list         |
 | `HARMONY_CONFIG_DIR`     | `$XDG_CONFIG_HOME/mcp-server-harmony` | Where `config.json` lives                                       |
 | `HARMONY_DRY_RUN`        | off                                   | Read the hubs, send nothing that changes anything (`serve --dry-run` too) |
-| `HARMONY_LOG_UNREDACTED` | off                                   | Don't mask IPs and MACs in logs (`--no-redact`)                 |
+| `HARMONY_LOG_UNREDACTED` | off                                   | Don't mask IPs and MACs in logs (`--no-redact`); secrets stay masked |
 
 `config.json` (written by `check`, safe to edit by hand):
 
@@ -205,7 +206,8 @@ Two hubs that both have "Listen to Music". (Output from `simulate`, trimmed.)
   would send.
 - **Resilient.** Each hub reconnects with backoff, and re-reads its state after a reconnect.
   An offline hub doesn't block the others, and shutdown is bounded per hub.
-- **Logs are redacted** (IP addresses, MACs) and go to stderr; stdout is the MCP transport.
+- **Logs are redacted**: IP addresses and MACs (unless `--no-redact`), and always secrets (JWTs,
+  bearer tokens, keys, URL passwords). They go to stderr; stdout is the MCP transport.
 - Every tool carries a title and MCP annotations. Nothing is marked destructive (activities and
   button presses change what's on, not data). `send_command` is the one non-idempotent action,
   since VolumeUp twice is +2.

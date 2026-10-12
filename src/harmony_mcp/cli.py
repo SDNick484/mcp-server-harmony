@@ -227,7 +227,9 @@ def build_parser() -> argparse.ArgumentParser:
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("-v", "--verbose", action="count", default=0, help="debug logging (aioharmony frames too)")
     common.add_argument(
-        "--no-redact", action="store_true", help="don't mask IPs and MACs in logs (HARMONY_LOG_UNREDACTED=1)"
+        "--no-redact",
+        action="store_true",
+        help="don't mask IPs and MACs in logs; secrets stay masked (HARMONY_LOG_UNREDACTED=1)",
     )
     sub = parser.add_subparsers(dest="cmd")
     serve = sub.add_parser("serve", parents=[common], help="Run the MCP server (stdio by default, or --http)")
