@@ -40,6 +40,7 @@ Why it works the way it does:
 from __future__ import annotations
 
 import argparse
+import contextlib
 import difflib
 import os
 import re
@@ -281,11 +282,27 @@ def _diff(local: Path, wanted: bytes, label: str) -> list[str]:
     return shown
 
 
+def _quiet_stdout() -> None:
+    """Point stdout at /dev/null, so the interpreter's flush at exit can't raise BrokenPipeError again."""
+    with contextlib.suppress(AttributeError, OSError, ValueError):  # stdout isn't a real file (e.g. under pytest)
+        os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+
+
 def report(root: Path, files: dict[str, bytes], label: str, fix: str) -> int:
     found = differences(root, files)
     if not found:
         print(f"shared files: all {len(files)} match {label}")
         return 0
+    try:
+        _print_report(root, files, found, label, fix)
+    except BrokenPipeError:
+        # Piped into something that stopped reading (`--check | head`). The listing was cut short,
+        # but the answer stands: something differs. Without this, a traceback hid the exit status.
+        _quiet_stdout()
+    return 1
+
+
+def _print_report(root: Path, files: dict[str, bytes], found: list[tuple[str, str]], label: str, fix: str) -> None:
     annotate = os.environ.get("GITHUB_ACTIONS") == "true"
     print(f"shared files: {len(found)} of {len(files)} don't match {label}:")
     for target, status in found:
@@ -300,7 +317,6 @@ def report(root: Path, files: dict[str, bytes], label: str, fix: str) -> int:
         if status == "differs":
             print(f"\n  {target}:")
             print("\n".join(_diff(root / target, files[target], label)))
-    return 1
 
 
 # --- the command line ------------------------------------------------------------------------

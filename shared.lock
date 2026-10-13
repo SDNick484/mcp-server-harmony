@@ -2,5 +2,5 @@
 # repo's package name (it replaces __PKG__). Written by
 # `python scripts/sync_shared.py --update`; see that script.
 repo = "SDNick484/mcp-server-shared"
-commit = "223e2aa022cc05d0bda2c9113c8885317895bd28"
+commit = "b78e89f56f5668dcb3c3a2ff53bf1f38384e71bb"
 package = "harmony_mcp"
