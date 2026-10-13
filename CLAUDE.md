@@ -21,7 +21,11 @@ explain the reasoning behind non-obvious changes instead of only making them.
   hub-qualified refs (`Den/Watch TV`), the first-call startup grace, bounded shutdown
 - `src/harmony_mcp/server.py`: MCP tools, resources and a prompt (`MCPServer` from `mcp` 2.x)
 - `src/harmony_mcp/assumptions.py`: every unverified protocol claim (id, source, confidence, status)
-- `src/harmony_mcp/limits.py`, `logsafe.py`, `remote.py` (shared with siblings, keep identical)
+- `src/harmony_mcp/limits.py`: rate limits and per-call caps
+- Shared with the siblings (mcp-server-onkyo, -shieldtv, -webos and the other of harmony/sofabaton):
+  `src/harmony_mcp/remote.py` and `logsafe.py` are byte-identical; `tests/test_remote.py` and
+  `tests/test_logsafe.py` are identical except for the package name. Change all five repos together;
+  the current revision is the one in mcp-server-webos. `limits.py` is shared with Sofabaton only.
 - `src/harmony_mcp/discovery.py` (SSDP), `doctor.py`, `cli.py`: `serve` (default), `check`,
   `call`, `discover`, `doctor`, `simulate`
 - `src/harmony_mcp/sim/fake_hub.py` + `fixtures/`: a wire-level fake hub (aiohttp) that the real
@@ -53,7 +57,7 @@ explain the reasoning behind non-obvious changes instead of only making them.
 - **Don't invent protocol details.** Anything not confirmed on hardware is an `Assumption`, cited
   as `# ASSUMPTION <id>` where code depends on it, in README's table and HARDWARE_VALIDATION.md.
   `test_assumptions` enforces it.
-- Log to **stderr only**, through `logsafe` (IPs and MACs redacted). stdout is the MCP stdio
+- Log to **stderr only**, through `logsafe` (IPs and MACs redacted; secrets always). stdout is the MCP stdio
   transport.
 - Every tool has a `title`, explicit `ToolAnnotations`, and constrained args via
   `Annotated[..., Field(...)]`. `test_tools.py` enforces this. Nothing is destructive.
