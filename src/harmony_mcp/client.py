@@ -41,6 +41,7 @@ from .limits import (
     PRESS_RATE,
     TokenBucket,
 )
+from .tasks import stop_task
 
 log = logging.getLogger(__name__)
 
@@ -112,6 +113,10 @@ class HubClient:
     repeat_gap = 0.4
     # First reconnect wait; doubles up to 60s. (Class attributes so tests can shrink them.)
     retry_delay = 1.0
+    # How long stop() gives each background task. Under HubRegistry's per-hub STOP_TIMEOUT (5s), so a
+    # task that won't stop is abandoned here, with a warning naming it, and there's still time to close
+    # the connection. The registry's timeout stays as the backstop.
+    stop_timeout = 3.0
 
     def __init__(
         self,
@@ -165,11 +170,15 @@ class HubClient:
         self._task = asyncio.create_task(self._connect_forever(), name="harmony-connect")
 
     async def stop(self) -> None:
-        for task in (self._task, self._resync_task):
-            if task is not None:
-                task.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await task
+        # stop_task, not cancel-and-await. A task can lose a cancel (anything it awaits can, on Python
+        # 3.11), and awaiting it then never returns. Cancelling the await doesn't help: it only passes
+        # another cancel to the task and goes on waiting, so HubRegistry's timeout couldn't bound it
+        # either. And suppressing CancelledError around the await also swallowed the cancel that
+        # timeout relies on. Both tasks at once, so two wedged ones cost one stop_timeout, not two.
+        await asyncio.gather(
+            stop_task(self._resync_task, self.stop_timeout, f"{self.name}'s state refresh"),
+            stop_task(self._task, self.stop_timeout, f"{self.name}'s connection"),
+        )
         if self._api is not None:
             with contextlib.suppress(Exception):
                 await self._api.close()
