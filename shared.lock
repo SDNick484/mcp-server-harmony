@@ -1,0 +1,6 @@
+# Which mcp-server-shared commit this repo's shared files come from, and this
+# repo's package name (it replaces __PKG__). Written by
+# `python scripts/sync_shared.py --update`; see that script.
+repo = "SDNick484/mcp-server-shared"
+commit = "223e2aa022cc05d0bda2c9113c8885317895bd28"
+package = "harmony_mcp"

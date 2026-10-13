@@ -1,4 +1,9 @@
-"""Log redaction (logsafe.py is shared with the sibling servers)."""
+"""Log redaction.
+
+Shared by the sibling servers along with logsafe.py; only the package name in
+the import below differs between repos. Change it in mcp-server-shared, not in
+a copy, then sync.
+"""
 
 from __future__ import annotations
 

@@ -1,7 +1,8 @@
 """The HTTP transport and the Cloudflare Access check.
 
-Shared by the sibling servers along with remote.py; only the import below
-differs between repos. The end-to-end tests run a real uvicorn server on a
+Shared by the sibling servers along with remote.py; only the package name in
+the import below differs between repos. Change it in mcp-server-shared, not in
+a copy, then sync. The end-to-end tests run a real uvicorn server on a
 free port and talk MCP to it over HTTP, signing Access assertions with a
 throwaway RSA key, so nothing here needs Cloudflare.
 """
