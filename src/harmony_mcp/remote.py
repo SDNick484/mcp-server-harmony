@@ -1,7 +1,7 @@
 """Serve an MCP server over Streamable HTTP, behind Cloudflare Access.
 
-This file is shared, identical, by the sibling servers (mcp-server-onkyo,
--shieldtv, -harmony, -sofabaton). Change it in one, copy it to the others.
+Shared by the sibling servers, byte for byte. Change it in mcp-server-shared,
+not in a copy, then sync (`python scripts/sync_shared.py --update`).
 
 Why HTTP: stdio means the MCP client launches the server on its own machine.
 To use one server from Claude Code, Claude Desktop and the mobile app, it has

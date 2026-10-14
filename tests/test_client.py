@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 from aioharmony.exceptions import TimeOut
 
 from harmony_mcp.client import HarmonyError, HubClient
 from harmony_mcp.config import HubSettings
+from harmony_mcp.hubs import HubRegistry
 
-from .conftest import LIVING, ONKYO, WATCH_SHIELD, wait_until
+from .conftest import LIVING, ONKYO, WATCH_SHIELD, FakeHarmonyAPI, wait_until
 
 pytestmark = pytest.mark.anyio
 
@@ -133,3 +136,100 @@ async def test_stop_closes_the_connection(fake):
     await wait_until(lambda: c.available)
     await c.stop()
     assert fake.closed and not c.available
+
+
+# --- shutdown: tasks that don't stop on the first cancel ---------------------------------------
+# Anything a task awaits can lose a cancellation: on Python 3.11, asyncio.wait_for returns its
+# result and drops a cancel that lands in the same loop iteration (CPython PR #28149). The old
+# stop() cancelled once and awaited, so such a task kept stop() waiting forever. These fakes
+# drop exactly one cancel; stop() runs in its own task so a hang fails the test, not the run.
+class DropsCancels:
+    """Awaits "the network" in 0.2 s steps, losing the first `drops` cancellations it gets."""
+
+    def __init__(self, drops: int = 1) -> None:
+        self.drops = drops
+        self.dropped = 0
+
+    async def wait(self) -> None:
+        try:
+            await asyncio.sleep(0.2)
+        except asyncio.CancelledError:
+            if self.dropped >= self.drops:
+                raise
+            self.dropped += 1
+
+
+class UnreachableHub(FakeHarmonyAPI):
+    """A hub that never answers, so the connect task retries until stopped."""
+
+    def __init__(self, drops: int = 1) -> None:
+        super().__init__()
+        self.network = DropsCancels(drops)
+
+    async def connect(self) -> bool:
+        self.connect_calls += 1
+        await self.network.wait()
+        return False
+
+
+class SlowRefresh:
+    """HarmonyAPI._harmony_client, whose refresh after a reconnect takes a long time."""
+
+    def __init__(self) -> None:
+        self.network = DropsCancels()
+
+    async def refresh_info_from_hub(self) -> None:
+        while True:
+            await self.network.wait()
+
+
+async def stopped_within(c: HubClient, seconds: float = 3) -> None:
+    stopping = asyncio.create_task(c.stop())
+    done, _ = await asyncio.wait({stopping}, timeout=seconds)
+    assert stopping in done, "stop() hung"
+
+
+async def test_stop_ends_a_connect_task_that_drops_a_cancel():
+    hub = UnreachableHub()
+    c = HubClient(HubSettings(LIVING), api_factory=hub.build)
+    await c.start()
+    await wait_until(lambda: hub.connect_calls > 0)
+    await stopped_within(c)
+    assert hub.network.dropped == 1 and c._task is not None and c._task.done()
+
+
+async def test_stop_ends_a_state_refresh_that_drops_a_cancel(fake):
+    c = HubClient(HubSettings(LIVING), api_factory=fake.build)
+    await c.start()
+    await wait_until(lambda: c.available)
+    refresh = SlowRefresh()
+    fake._harmony_client = refresh  # type: ignore[attr-defined]
+    fake.push_disconnect()
+    assert fake.callbacks is not None
+    fake.callbacks.connect(LIVING)  # aioharmony reconnected on its own: _resync starts
+    await asyncio.sleep(0.05)
+    assert c._resync_task is not None and not c._resync_task.done()
+    await stopped_within(c)
+    assert refresh.network.dropped == 1 and c._resync_task.done() and fake.closed
+
+
+async def test_a_task_dropping_two_cancels_cannot_hang_registry_shutdown(settings, fakes, factory):
+    # HubRegistry bounds each hub's stop() with asyncio.timeout, which cancels the waiting stop(). But
+    # a coroutine awaiting a task, when cancelled, passes the cancel on to that task and keeps waiting
+    # for it to finish. So the old bound only held if the task honored that second cancel. Dropping
+    # one cancel made shutdown sit out the whole STOP_TIMEOUT, silently (stop() suppressed the
+    # CancelledError the timeout relies on); dropping two made HubRegistry.stop() never return.
+    fakes[LIVING] = hub = UnreachableHub(drops=2)
+    reg = HubRegistry(settings, api_factory=factory)
+    await reg.start()
+    await wait_until(lambda: hub.connect_calls > 0)
+    stopping = asyncio.create_task(reg.stop())
+    try:
+        done, _ = await asyncio.wait({stopping}, timeout=3)  # well under STOP_TIMEOUT (5 s)
+        assert stopping in done, "shutdown hung"
+        task = reg.hubs[0]._task
+        assert task is not None and task.done() and hub.network.dropped == 2
+    finally:
+        hub.network.drops = 0  # whatever happened, let the next cancel through so the loop can close
+        stopping.cancel()
+        await asyncio.wait({stopping}, timeout=1)
