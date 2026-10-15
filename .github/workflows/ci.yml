@@ -29,6 +29,12 @@ jobs:
       - run: mypy
       - run: pytest
 
+  alpine:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: docker run --rm -v "$PWD:/src" -w /src python:3.12-alpine sh deploy/alpine/smoke-test.sh
+
   # The files shared with the sibling servers (shared.lock, scripts/sync_shared.py) must
   # match mcp-server-shared, the source of truth. On pushes and PRs: at the locked commit,
   # so a copy edited here fails, and a PR is never judged on changes made elsewhere. On the
