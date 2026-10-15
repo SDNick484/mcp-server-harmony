@@ -104,6 +104,26 @@ Every request must carry a valid Access JWT (`Cf-Access-Jwt-Assertion`). The che
 flags are documented in `src/harmony_mcp/remote.py`. The Host-header (DNS-rebinding) checks stay on
 even with `--bind 0.0.0.0`: for LAN clients, also pass `--public-host <this machine's LAN IP>`.
 
+### As an OpenRC service on Alpine (e.g. a Proxmox LXC)
+
+`deploy/alpine/` installs it the same way as mcp-server-webos, so the two can share an LXC: a venv
+in `/opt/mcp-server-harmony`, a `mcp-harmony` system user, settings in
+`/etc/mcp-server-harmony/env`, the hub list in `/var/lib/mcp-server-harmony/config.json`, and
+`supervise-daemon` restarting it if it exits. The LXC needs TCP 8088 to each hub.
+
+```sh
+git clone https://github.com/SDNick484/mcp-server-harmony.git && cd mcp-server-harmony
+sh deploy/alpine/install.sh                                # as root; re-run to upgrade
+su -s /bin/sh mcp-harmony -c 'HARMONY_CONFIG_DIR=/var/lib/mcp-server-harmony \
+  /opt/mcp-server-harmony/venv/bin/mcp-server-harmony check --host <hub ip>'    # once per hub
+vi /etc/mcp-server-harmony/env                             # public host and Access settings
+rc-update add mcp-server-harmony default && rc-service mcp-server-harmony start
+```
+
+Logs are in `/var/log/mcp-server-harmony/server.log`. CI runs `deploy/alpine/smoke-test.sh` in a
+stock `python:3.12-alpine` container: install, the test suite on musl, the service under OpenRC,
+and an MCP call over HTTP reaching a simulated hub.
+
 ## Configuration
 
 | Setting                  | Default                               | What it does                                                    |

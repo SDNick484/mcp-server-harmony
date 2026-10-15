@@ -34,6 +34,8 @@ explain the reasoning behind non-obvious changes instead of only making them.
   `call`, `discover`, `doctor`, `simulate`
 - `src/harmony_mcp/sim/fake_hub.py` + `fixtures/`: a wire-level fake hub (aiohttp) that the real
   aioharmony talks to; used by tests *and* `simulate`
+- `deploy/alpine/`: OpenRC service, install script and the container smoke test CI runs; same
+  layout as mcp-server-webos's, so both can share an LXC
 - `tests/`: `conftest.py` (`FakeHarmonyAPI` per hub for fast unit tests, fixtures loaded from the
   package; "Listen to Music" is on both hubs on purpose), `test_contract` (real aioharmony vs the
   fake hub over sockets), `test_catalog`, `test_config`, `test_client`, `test_tools` (in-process
