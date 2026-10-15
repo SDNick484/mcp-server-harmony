@@ -93,7 +93,8 @@ explain the reasoning behind non-obvious changes instead of only making them.
 
 ## Status
 
-Verified against the simulator only. HARDWARE_VALIDATION.md is the checklist (`doctor` points at
+Partly verified on real hubs (2026-10-14: connect, status, names, power off; see the `hardware-verified`
+entries in `assumptions.py`); everything else against the simulator only. HARDWARE_VALIDATION.md is the checklist (`doctor` points at
 its step 3, so keep the numbering). Captures from `doctor --dump` go in
 `tests/fixtures/recorded/`. Cross-project fact from mcp-server-shieldtv: the hub is also the
 Shield's Bluetooth keyboard ("Harmony Keyboard"); after a Shield reboot it can be stuck, and the

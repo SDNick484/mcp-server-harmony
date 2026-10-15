@@ -38,12 +38,17 @@ class Assumption:
     note: str = ""
 
 
+# Hardware runs, cited by the notes below.
+_HW_2026_10_14 = "2026-10-14, two real hubs (Harmony Hub, Office Hub, firmware 4.15.600) via the service on LXC210"
+
 ASSUMPTIONS: tuple[Assumption, ...] = (
     Assumption(
         "H-PORT",
         "The hub's local API is HTTP and websocket on TCP 8088.",
         "aioharmony const.DEFAULT_WS_HUB_PORT, used for every request",
         "high",
+        status="hardware-verified",
+        note=_HW_2026_10_14 + ": both hubs connected on 8088.",
     ),
     Assumption(
         "H-PROVISION",
@@ -51,6 +56,8 @@ ASSUMPTIONS: tuple[Assumption, ...] = (
         "which the websocket URL needs as hubId.",
         "aioharmony hubconnector_websocket._retrieve_hub_info; Home Assistant validates hubs the same way",
         "high",
+        status="hardware-verified",
+        note=_HW_2026_10_14 + ": both websockets opened, which needs the provisioned hubId.",
     ),
     Assumption(
         "H-FRAMES",
@@ -58,6 +65,8 @@ ASSUMPTIONS: tuple[Assumption, ...] = (
         "matched to requests by id.",
         "aioharmony hub_send and responsehandler",
         "high",
+        status="hardware-verified",
+        note=_HW_2026_10_14 + ": get_status and power_off got their replies.",
     ),
     Assumption(
         "H-CONFIG-SHAPE",
@@ -65,18 +74,25 @@ ASSUMPTIONS: tuple[Assumption, ...] = (
         "function's action is a JSON *string* holding command and deviceId.",
         "aioharmony json_config and _get_config",
         "high",
+        note="Partial, " + _HW_2026_10_14 + ": the running activity's id (32845636) resolved to its name "
+        "through the parsed config. Devices and commands not exercised yet.",
     ),
     Assumption(
         "H-POWEROFF",
         "Activity -1 is the built-in PowerOff; starting it turns everything off.",
         "aioharmony power_off() is start_activity(-1)",
         "high",
+        status="hardware-verified",
+        note=_HW_2026_10_14 + ": power_off on Office Hub sent runactivity -1; the hub went off, and the LG "
+        "Office TV dropped to standby (confirmed independently by mcp-server-webos).",
     ),
     Assumption(
         "H-NAME",
         "'connect.discoveryinfo?get' returns the hub's friendlyName (the name set in the Harmony app).",
         "aioharmony HarmonyClient.name",
         "high",
+        status="hardware-verified",
+        note=_HW_2026_10_14 + ": the hubs reported 'Harmony Hub' and 'Office Hub'.",
     ),
     Assumption(
         "H-START-SEQUENCE",

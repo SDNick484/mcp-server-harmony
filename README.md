@@ -8,9 +8,11 @@ Assistant and no Logitech cloud. It lets an MCP client such as Claude start and 
 activities, press buttons, and read what's on. It works with any remote paired to a hub (Elite,
 Companion, 950), since the server talks to the hub, not the remote.
 
-> **Status: verified against the simulator only.** The tests run the real aioharmony library
-> against a wire-level fake hub, but nothing has run against a real hub yet. Every protocol
-> detail that hasn't been confirmed on hardware is a named assumption (see
+> **Status: first contact with real hubs done (2026-10-14).** Two hubs connected, reported their
+> state and names, and powered off on request. Starting activities, button presses, reconnects
+> and config pushes are still verified against the simulator only: the tests run the real
+> aioharmony library against a wire-level fake hub. Every protocol detail that hasn't been
+> confirmed on hardware is a named assumption (see
 > [Verification status](#verification-status)), and
 > [HARDWARE_VALIDATION.md](HARDWARE_VALIDATION.md) is the checklist for confirming them.
 
@@ -277,17 +279,18 @@ What the tests cover:
 
 ## Verification status
 
-Everything is **verified against the simulator only**. These are the protocol assumptions the
-code depends on (claim and source for each in `src/harmony_mcp/assumptions.py`):
+These are the protocol assumptions the code depends on (claim, source, and for verified ones the
+evidence, in `src/harmony_mcp/assumptions.py`). `hardware-verified` means seen working on a real hub;
+the rest are verified against the simulator only:
 
 | Assumption         | Confidence | Status         |
 | ------------------ | ---------- | -------------- |
-| `H-PORT`           | high       | simulator-only |
-| `H-PROVISION`      | high       | simulator-only |
-| `H-FRAMES`         | high       | simulator-only |
+| `H-PORT`           | high       | hardware-verified |
+| `H-PROVISION`      | high       | hardware-verified |
+| `H-FRAMES`         | high       | hardware-verified |
 | `H-CONFIG-SHAPE`   | high       | simulator-only |
-| `H-POWEROFF`       | high       | simulator-only |
-| `H-NAME`           | high       | simulator-only |
+| `H-POWEROFF`       | high       | hardware-verified |
+| `H-NAME`           | high       | hardware-verified |
 | `H-START-SEQUENCE` | medium     | simulator-only |
 | `H-PRESS-SILENT`   | medium     | simulator-only |
 | `H-PRESS-ERROR`    | low        | simulator-only |
