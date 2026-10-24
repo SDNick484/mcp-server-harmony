@@ -10,7 +10,7 @@ import pytest
 from harmony_mcp.client import HarmonyError, HubClient
 from harmony_mcp.config import HubSettings, load_settings
 from harmony_mcp.hubs import HubRegistry
-from harmony_mcp.limits import TokenBucket
+from harmony_mcp.ratelimit import TokenBucket
 
 from .conftest import LIVING, ONKYO, wait_until
 from .test_tools import connect, outcomes, text
@@ -80,16 +80,7 @@ async def test_hold_and_delay_reach_aioharmony(hub, fake):
     assert fake.sent[1] == 0.15  # a bare float is aioharmony's pause between presses
 
 
-def test_token_bucket_refills_over_time():
-    now = [0.0]
-    b = TokenBucket(capacity=3, rate=1.0, clock=lambda: now[0])
-    assert [b.take() for _ in range(3)] == [0.0, 0.0, 0.0]
-    assert b.take() == pytest.approx(1.0)  # empty: wait one second for one token
-    now[0] = 2.0
-    assert b.take(2) == 0.0
-    assert b.take(4) == float("inf")  # more than the bucket can ever hold
-
-
+# TokenBucket itself is tested in test_ratelimit.py (shared); these test how the hub uses it.
 async def test_runaway_presses_are_refused_whole(hub, fake):
     now = [0.0]
     hub.press_bucket = TokenBucket(capacity=5, rate=1.0, clock=lambda: now[0])

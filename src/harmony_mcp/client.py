@@ -39,8 +39,8 @@ from .limits import (
     MIN_DELAY_MS,
     PRESS_CAPACITY,
     PRESS_RATE,
-    TokenBucket,
 )
+from .ratelimit import TokenBucket, refusal
 from .tasks import stop_task
 
 log = logging.getLogger(__name__)
@@ -305,11 +305,7 @@ class HubClient:
     def _limit(self, bucket: TokenBucket, n: int, what: str) -> None:
         wait = bucket.take(n)
         if wait:
-            when = "it's more than the limit allows at once" if wait == float("inf") else f"try again in {wait:.0f}s"
-            raise HarmonyError(
-                f"Rate limit on {self.name}: refusing to {what} ({when}). This guards against runaway loops; "
-                "if this is deliberate, wait and retry."
-            )
+            raise HarmonyError(refusal(what, wait, device=self.name))
 
     async def start_activity(self, activity: Activity) -> Outcome:
         """Start an activity and wait until the hub says it's done.

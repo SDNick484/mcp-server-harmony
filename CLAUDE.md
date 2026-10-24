@@ -21,15 +21,16 @@ explain the reasoning behind non-obvious changes instead of only making them.
   hub-qualified refs (`Den/Watch TV`), the first-call startup grace, bounded shutdown
 - `src/harmony_mcp/server.py`: MCP tools, resources and a prompt (`MCPServer` from `mcp` 2.x)
 - `src/harmony_mcp/assumptions.py`: every unverified protocol claim (id, source, confidence, status)
-- `src/harmony_mcp/limits.py`: rate limits and per-call caps
+- `src/harmony_mcp/limits.py`: this server's rate-limit numbers and per-call caps (the mechanism,
+  `TokenBucket` and `refusal`, is shared `ratelimit.py`)
 - **Shared with the siblings; the source of truth is mcp-server-shared.** `src/harmony_mcp/remote.py`,
-  `logsafe.py`, `tasks.py` (`stop_task`), `scripts/sync_shared.py`, and `tests/test_remote.py`,
-  `test_logsafe.py`, `test_tasks.py` (rendered with this package's name); mcp-server-shared's
+  `logsafe.py`, `tasks.py` (`stop_task`), `ratelimit.py`, `scripts/sync_shared.py`, and
+  `tests/test_remote.py`, `test_logsafe.py`, `test_tasks.py`, `test_ratelimit.py` (rendered with this
+  package's name); mcp-server-shared's
   `shared.toml` is the full list. Don't edit them here: change them in mcp-server-shared, then run
   `python scripts/sync_shared.py --update` here and commit the files together with `shared.lock`.
   `python scripts/sync_shared.py --check` (CI's `shared-drift` job) fails on any difference from the
   locked commit; a weekly scheduled run also fails once mcp-server-shared `main` has moved past it.
-  `limits.py` is shared with Sofabaton only, by hand (not synced).
 - `src/harmony_mcp/discovery.py` (SSDP), `doctor.py`, `cli.py`: `serve` (default), `check`,
   `call`, `discover`, `doctor`, `simulate`
 - `src/harmony_mcp/sim/fake_hub.py` + `fixtures/`: a wire-level fake hub (aiohttp) that the real
