@@ -24,9 +24,10 @@ explain the reasoning behind non-obvious changes instead of only making them.
 - `src/harmony_mcp/limits.py`: this server's rate-limit numbers and per-call caps (the mechanism,
   `TokenBucket` and `refusal`, is shared `ratelimit.py`)
 - **Shared with the siblings; the source of truth is mcp-server-shared.** `src/harmony_mcp/remote.py`,
-  `logsafe.py`, `tasks.py` (`stop_task`), `ratelimit.py`, `scripts/sync_shared.py`, and
-  `tests/test_remote.py`, `test_logsafe.py`, `test_tasks.py`, `test_ratelimit.py` (rendered with this
-  package's name); mcp-server-shared's
+  `logsafe.py`, `tasks.py` (`stop_task`), `ratelimit.py`, `registry.py` (the assumption record and its
+  queries; not used here yet, `assumptions.py` still has its own), `scripts/sync_shared.py`, and
+  `tests/test_remote.py`, `test_logsafe.py`, `test_tasks.py`, `test_ratelimit.py`, `test_registry.py`
+  (rendered with this package's name); mcp-server-shared's
   `shared.toml` is the full list. Don't edit them here: change them in mcp-server-shared, then run
   `python scripts/sync_shared.py --update` here and commit the files together with `shared.lock`.
   `python scripts/sync_shared.py --check` (CI's `shared-drift` job) fails on any difference from the
