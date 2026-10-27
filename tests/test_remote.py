@@ -75,6 +75,9 @@ def test_environment_then_flags():
 @pytest.mark.parametrize(
     "argv,env,message",
     [
+        (["--port", "0"], {}, "--port must be between 1 and 65535"),
+        (["--port", "-1"], {}, "--port must be between 1 and 65535"),
+        (["--port", "65536"], {}, "--port must be between 1 and 65535"),
         (["--bind", "0.0.0.0"], {}, "Refusing to serve on 0.0.0.0 without Cloudflare Access"),
         (["--path", "mcp"], {}, "must start with '/'"),
         (["--path", "/healthz"], {}, "can't be /healthz"),
@@ -96,6 +99,24 @@ def test_insecure_flag_is_an_explicit_opt_out():
 
 def test_a_public_host_is_fine_with_access():
     parse(["--public-host", "mcp.example.com"], {"CF_ACCESS_TEAM_DOMAIN": TEAM, "CF_ACCESS_AUD": AUD}).check()
+
+
+def test_loopback_recognizes_localhost_ipv6_and_rejects_non_loopback():
+    assert remote.HttpConfig(bind="localhost").loopback is True
+    assert remote.HttpConfig(bind="::1").loopback is True
+    assert remote.HttpConfig(bind="127.0.0.1").loopback is True
+    assert remote.HttpConfig(bind="0.0.0.0").loopback is False
+    assert remote.HttpConfig(bind="device.lan").loopback is False
+    with pytest.raises(remote.ConfigError, match="Refusing to serve on device.lan"):
+        remote.HttpConfig(bind="device.lan").check()
+
+
+def test_certs_url_and_default_verifier_wiring():
+    assert POLICY.certs_url == f"https://{TEAM}/cdn-cgi/access/certs"
+    app = remote.build_app(tiny_server([]), CFG)
+    assert isinstance(app, remote.AccessMiddleware)
+    assert isinstance(app.verifier, remote.AccessVerifier)
+    assert app.verifier.policy == POLICY
 
 
 # --- the verifier ---------------------------------------------------------------
@@ -161,14 +182,18 @@ def tiny_server(starts: list[int]) -> MCPServer:
 
 
 @asynccontextmanager
-async def running(cfg: remote.HttpConfig, starts: list[int]):
+async def running(
+    cfg: remote.HttpConfig,
+    starts: list[int],
+    health_check: remote.HealthChecker | None = None,
+):
     import uvicorn
 
     sock = socket.socket()
     sock.bind(("127.0.0.1", 0))
     port = sock.getsockname()[1]
     verifier = remote.AccessVerifier(POLICY, public_key) if cfg.access else None
-    app = remote.build_app(tiny_server(starts), cfg, verifier)
+    app = remote.build_app(tiny_server(starts), cfg, verifier, health_check=health_check)
     server = uvicorn.Server(uvicorn.Config(app, log_level="warning", lifespan="on"))
     async with anyio.create_task_group() as tg:
         tg.start_soon(server.serve, [sock])
@@ -212,6 +237,55 @@ async def test_health_check_needs_no_assertion():
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize(
+    "result,expected_status,expected_body",
+    [
+        (True, 200, {"status": "ok"}),
+        ({"hub": "connected"}, 200, {"status": "ok", "hub": "connected"}),
+        (False, 503, {"status": "degraded", "error": "health check returned False"}),
+        ({"status": "degraded", "hub": "offline"}, 503, {"status": "degraded", "hub": "offline"}),
+        ({"error": "timeout"}, 503, {"status": "degraded", "error": "timeout"}),
+    ],
+)
+async def test_health_check_custom_readiness(result, expected_status, expected_body):
+    async def check():
+        return result
+
+    async with running(CFG, [], health_check=check) as base, httpx2.AsyncClient() as http:
+        resp = await http.get(f"{base}/healthz")
+        assert (resp.status_code, resp.json()) == (expected_status, expected_body)
+
+
+@pytest.mark.anyio
+async def test_health_check_exception_returns_503():
+    async def broken():
+        raise RuntimeError("hub unreachable")
+
+    async with running(CFG, [], health_check=broken) as base, httpx2.AsyncClient() as http:
+        resp = await http.get(f"{base}/healthz")
+        assert (resp.status_code, resp.json()) == (503, {"status": "degraded", "error": "hub unreachable"})
+
+
+@pytest.mark.anyio
+async def test_options_preflight_succeeds_without_assertion():
+    async with running(CFG, []) as base, httpx2.AsyncClient() as http:
+        resp = await http.options(f"{base}/thing/mcp", headers={"origin": "https://claude.ai"})
+        assert resp.status_code == 204
+        assert resp.text == ""
+        assert resp.headers["access-control-allow-origin"] == "https://claude.ai"
+        assert resp.headers["access-control-allow-methods"] == "POST, GET, DELETE, OPTIONS"
+        assert (
+            resp.headers["access-control-allow-headers"]
+            == "content-type, cf-access-jwt-assertion, authorization, mcp-session-id, mcp-protocol-version"
+        )
+        assert resp.headers["access-control-max-age"] == "86400"
+
+        resp_no_origin = await http.options(f"{base}/thing/mcp")
+        assert resp_no_origin.status_code == 204
+        assert resp_no_origin.headers["access-control-allow-origin"] == "*"
+
+
+@pytest.mark.anyio
 async def test_unexpected_host_is_rejected_even_with_a_valid_assertion():
     # DNS-rebinding protection: only the public host and loopback are accepted.
     async with running(CFG, []) as base, httpx2.AsyncClient() as http:
@@ -222,7 +296,7 @@ async def test_unexpected_host_is_rejected_even_with_a_valid_assertion():
 
 
 @pytest.mark.anyio
-async def test_wildcard_bind_keeps_host_checks_on():
+async def test_wildcard_bind_keeps_host_checks_on(caplog):
     # Binding to every interface with no --public-host used to switch the
     # Host checks off, leaving a LAN server open to DNS rebinding. Now only
     # loopback (and any --public-host) is accepted.
@@ -230,8 +304,24 @@ async def test_wildcard_bind_keeps_host_checks_on():
     sec = remote.transport_security(cfg)
     assert sec.enable_dns_rebinding_protection is True
     assert "127.0.0.1:*" in sec.allowed_hosts and not any("evil" in h for h in sec.allowed_hosts)
+    assert "Binding to 0.0.0.0 with no --public-host" in caplog.text
     lan = remote.transport_security(remote.HttpConfig(bind="0.0.0.0", public_hosts=("192.168.1.10",)))
     assert "192.168.1.10:*" in lan.allowed_hosts and "http://192.168.1.10:*" in lan.allowed_origins
+
+
+def test_ipv6_bind_and_public_hosts_in_transport_security(caplog):
+    v6_local = remote.transport_security(remote.HttpConfig(bind="::1"))
+    assert "[::1]:*" in v6_local.allowed_hosts
+
+    v6_lan = remote.transport_security(
+        remote.HttpConfig(bind="2001:db8::10", public_hosts=("[2001:db8::10]",), insecure_no_auth=True)
+    )
+    assert "[2001:db8::10]:*" in v6_lan.allowed_hosts
+    assert "http://[2001:db8::10]:*" in v6_lan.allowed_origins
+
+    v6_wild = remote.transport_security(remote.HttpConfig(bind="::", insecure_no_auth=True))
+    assert "[::]:*" not in v6_wild.allowed_hosts
+    assert "Binding to :: with no --public-host" in caplog.text
 
 
 # --- no Access: this machine only ----------------------------------------------------

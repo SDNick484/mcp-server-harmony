@@ -68,6 +68,7 @@ ACCESS_HEADER = "cf-access-jwt-assertion"
 HEALTH_PATH = "/healthz"
 # Headers a proxy adds to what it forwards. A request with one didn't start on this machine.
 FORWARDED_HEADERS = ("forwarded", "x-forwarded-for", "x-real-ip", "cf-connecting-ip", "cf-ray")
+CORS_ALLOW_HEADERS = b"content-type, cf-access-jwt-assertion, authorization, mcp-session-id, mcp-protocol-version"
 
 
 class ConfigError(ValueError):
@@ -124,6 +125,8 @@ class HttpConfig:
 
     def check(self) -> None:
         """Refuse settings that would expose device control without auth."""
+        if not (1 <= self.port <= 65535):
+            raise ConfigError(f"--port must be between 1 and 65535 (got {self.port}).")
         if not self.path.startswith("/") or self.path == HEALTH_PATH:
             raise ConfigError(f"--path must start with '/' and can't be {HEALTH_PATH} (got {self.path!r}).")
         if self.access is not None and not self.access.audiences:
@@ -176,7 +179,7 @@ def http_config(args: argparse.Namespace, env: Mapping[str, str] | None = None) 
             audiences=_csv(env.get("CF_ACCESS_AUD")),
             emails=frozenset(e.lower() for e in _csv(env.get("MCP_ALLOWED_EMAILS"))),
         )
-    port = args.port or env.get("MCP_HTTP_PORT") or args._http_default_port
+    port = args.port if args.port is not None else (env.get("MCP_HTTP_PORT") or args._http_default_port)
     return HttpConfig(
         bind=args.bind or env.get("MCP_HTTP_BIND") or "127.0.0.1",
         port=int(port),
@@ -189,6 +192,7 @@ def http_config(args: argparse.Namespace, env: Mapping[str, str] | None = None) 
 
 # --- verifying Access assertions ---------------------------------------------------
 KeyResolver = Callable[[str], Awaitable[Any]]
+HealthChecker = Callable[[], Awaitable[Mapping[str, Any] | bool]]
 
 
 class AccessVerifier:
@@ -207,7 +211,7 @@ class AccessVerifier:
         if key_resolver is None:
             client = jwt.PyJWKClient(policy.certs_url, cache_jwk_set=True, lifespan=3600)
 
-            async def resolve(token: str) -> Any:
+            async def resolve(token: str) -> Any:  # pragma: no cover
                 key = await anyio.to_thread.run_sync(client.get_signing_key_from_jwt, token)
                 return key.key
 
@@ -236,8 +240,8 @@ class AccessVerifier:
 
 
 # --- ASGI wrappers ---------------------------------------------------------------------
-async def _plain(send: Send, status: int, body: dict[str, str]) -> None:
-    data = json.dumps(body).encode()
+async def _plain(send: Send, status: int, body: Mapping[str, Any]) -> None:
+    data = json.dumps(dict(body)).encode()
     await send(
         {
             "type": "http.response.start",
@@ -257,17 +261,42 @@ class AccessMiddleware:
     instead (see the module docstring).
     """
 
-    def __init__(self, app: ASGIApp, verifier: AccessVerifier | None, *, local_only: bool = False) -> None:
+    def __init__(
+        self,
+        app: ASGIApp,
+        verifier: AccessVerifier | None,
+        *,
+        local_only: bool = False,
+        health_check: HealthChecker | None = None,
+    ) -> None:
         self.app = app
         self.verifier = verifier
         self.local_only = local_only
+        self.health_check = health_check
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
         if scope["path"] == HEALTH_PATH:
-            await _plain(send, 200, {"status": "ok"})
+            if self.health_check is None:
+                await _plain(send, 200, {"status": "ok"})
+                return
+            try:
+                res = await self.health_check()
+            except Exception as exc:
+                await _plain(send, 503, {"status": "degraded", "error": str(exc)})
+                return
+            if res is False:
+                await _plain(send, 503, {"status": "degraded", "error": "health check returned False"})
+                return
+            if res is True:
+                await _plain(send, 200, {"status": "ok"})
+                return
+            if res.get("status") == "degraded" or "error" in res:
+                await _plain(send, 503, {"status": "degraded", **res})
+            else:
+                await _plain(send, 200, {"status": "ok", **res})
             return
         headers = dict(scope.get("headers") or [])
         if self.verifier is None and self.local_only:
@@ -284,6 +313,22 @@ class AccessMiddleware:
                 )
                 await _plain(send, 403, {"error": "forbidden"})
                 return
+        if scope.get("method") == "OPTIONS":
+            origin = headers.get(b"origin", b"*")
+            await send(
+                {
+                    "type": "http.response.start",
+                    "status": 204,
+                    "headers": [
+                        (b"access-control-allow-origin", origin),
+                        (b"access-control-allow-methods", b"POST, GET, DELETE, OPTIONS"),
+                        (b"access-control-allow-headers", CORS_ALLOW_HEADERS),
+                        (b"access-control-max-age", b"86400"),
+                    ],
+                }
+            )
+            await send({"type": "http.response.body", "body": b""})
+            return
         if self.verifier is not None:
             token = headers.get(ACCESS_HEADER.encode(), b"").decode()
             try:
@@ -336,7 +381,13 @@ def _is_ip(text: str) -> bool:
         return False
 
 
-def build_app(mcp: MCPServer, cfg: HttpConfig, verifier: AccessVerifier | None = None) -> ASGIApp:
+def build_app(
+    mcp: MCPServer,
+    cfg: HttpConfig,
+    verifier: AccessVerifier | None = None,
+    *,
+    health_check: HealthChecker | None = None,
+) -> ASGIApp:
     """The ASGI app: the SDK's Streamable HTTP app, wrapped in the Access check."""
     cfg.check()
     if verifier is None and cfg.access is not None:
@@ -344,14 +395,16 @@ def build_app(mcp: MCPServer, cfg: HttpConfig, verifier: AccessVerifier | None =
     app = mcp.streamable_http_app(
         streamable_http_path=cfg.path, transport_security=transport_security(cfg), host=cfg.bind
     )
-    return AccessMiddleware(app, verifier, local_only=cfg.local_only)
+    return AccessMiddleware(app, verifier, local_only=cfg.local_only, health_check=health_check)
 
 
-def serve_http(mcp: MCPServer, cfg: HttpConfig) -> None:
+def serve_http(  # pragma: no cover
+    mcp: MCPServer, cfg: HttpConfig, *, health_check: HealthChecker | None = None
+) -> None:
     """Run until interrupted. The server's lifespan (device connections) runs once, shared by all sessions."""
     import uvicorn
 
-    app = build_app(mcp, cfg)
+    app = build_app(mcp, cfg, health_check=health_check)
     if cfg.access is None:
         log.warning("Serving %s on %s:%s WITHOUT Cloudflare Access checks.", cfg.path, cfg.bind, cfg.port)
     else:
