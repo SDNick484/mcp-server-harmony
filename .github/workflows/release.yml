@@ -1,0 +1,78 @@
+name: Release
+
+# Pushing a tag like v0.2.0 builds the package, publishes it to PyPI and makes a GitHub release.
+#
+# No PyPI token is stored anywhere. PyPI's "trusted publishing" trusts this workflow instead: the
+# publish job asks GitHub for a short-lived OIDC token (id-token: write) that says "repo
+# SDNick484/mcp-server-harmony, workflow release.yml, environment pypi", and PyPI accepts uploads
+# only from a token matching the publisher configured on pypi.org. One-time setup is in
+# CONTRIBUTING.md ("Releasing").
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - name: The tag must match the package version
+        run: |
+          version=$(python -c 'import re, pathlib; print(re.search(r"__version__ = \"(.+)\"", pathlib.Path("src/harmony_mcp/__init__.py").read_text())[1])')
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::tag $GITHUB_REF_NAME doesn't match __version__ $version"; exit 1
+          fi
+          grep -q "^## \[$version\]" CHANGELOG.md || { echo "::error::CHANGELOG.md has no [$version] section"; exit 1; }
+      - run: pip install build twine
+      - run: python -m build
+      - run: twine check --strict dist/*
+      # The wheel must install and run on its own (no source tree next to it).
+      - run: |
+          python -m venv /tmp/v && /tmp/v/bin/pip install "$(ls dist/*.whl)"
+          /tmp/v/bin/mcp-server-harmony --version
+          /tmp/v/bin/python -c "import aioharmony; from importlib.resources import files; assert any(files('harmony_mcp.sim').joinpath('fixtures').iterdir())"  # the fake hub needs its fixtures
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dist
+          path: dist/
+
+  pypi:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/mcp-server-harmony/
+    permissions:
+      id-token: write  # the OIDC token PyPI's trusted publishing checks
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+  github-release:
+    needs: pypi
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist/
+      - name: Release notes from CHANGELOG.md
+        run: |
+          version=${GITHUB_REF_NAME#v}
+          awk -v v="$version" '/^## \[/{p = index($0, "[" v "]") > 0; next} p' CHANGELOG.md >notes.md
+      - run: gh release create "$GITHUB_REF_NAME" dist/* --title "$GITHUB_REF_NAME" --notes-file notes.md
+        env:
+          GH_TOKEN: ${{ github.token }}

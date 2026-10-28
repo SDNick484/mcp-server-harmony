@@ -102,6 +102,13 @@ its step 3, so keep the numbering). Captures from `doctor --dump` go in
 Shield's Bluetooth keyboard ("Harmony Keyboard"); after a Shield reboot it can be stuck, and the
 fix is power off then start the activity again (the `fix_stuck_remote` prompt).
 
+## Releases
+
+Version lives only in `src/harmony_mcp/__init__.py` (`pyproject.toml` reads it). Bump it and add a
+CHANGELOG.md section for every release: pip treats a same-version install as already satisfied. Pushing
+tag `vX.Y.Z` runs `.github/workflows/release.yml` (PyPI trusted publishing, then a GitHub release).
+CONTRIBUTING.md has the steps and the one-time PyPI setup.
+
 ## Commands
 
 ```sh
