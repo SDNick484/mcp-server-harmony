@@ -13,6 +13,10 @@ HARDWARE_VALIDATION.md, so the three can't drift apart.
 To record a hardware result, change ``status`` to "hardware-verified" (or
 "hardware-contradicted", with what you saw in ``note``) and commit it.
 
+Only the list is about Harmony. The record (``Assumption``), its statuses and the
+queries come from the shared ``registry.py`` (see its docstring for what each status
+means), so a fix there reaches every sibling server.
+
 Confidence is about the *claim*, judged from its source:
   high   - the library we run (aioharmony, used by Home Assistant) depends on it
   medium - inferred from another project's code or docs, not from aioharmony itself
@@ -21,22 +25,13 @@ Confidence is about the *claim*, judged from its source:
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Literal
+from collections.abc import Iterable
 
-Confidence = Literal["high", "medium", "low"]
-Status = Literal["simulator-only", "hardware-verified", "hardware-contradicted"]
+from .registry import Assumption, by_id, doctor_lines
+from .registry import contradicted as _contradicted
+from .registry import unverified as _unverified
 
-
-@dataclass(frozen=True)
-class Assumption:
-    id: str
-    claim: str
-    source: str
-    confidence: Confidence
-    status: Status = "simulator-only"
-    note: str = ""
-
+__all__ = ["ASSUMPTIONS", "BY_ID", "Assumption", "contradicted", "doctor_lines", "unverified"]
 
 # Hardware runs, cited by the notes below.
 _HW_2026_10_14 = "2026-10-14, two real hubs (Harmony Hub, Office Hub, firmware 4.15.600) via the service on LXC210"
@@ -159,8 +154,16 @@ ASSUMPTIONS: tuple[Assumption, ...] = (
     ),
 )
 
-BY_ID = {a.id: a for a in ASSUMPTIONS}
+# by_id, not a dict comprehension: a repeated id fails at import instead of silently dropping an entry.
+BY_ID = by_id(ASSUMPTIONS)
 
 
-def unverified() -> list[Assumption]:
-    return [a for a in ASSUMPTIONS if a.status != "hardware-verified"]
+# The shared queries take the list as an argument (they serve every sibling); these default it to ours.
+def unverified(assumptions: Iterable[Assumption] = ASSUMPTIONS) -> list[Assumption]:
+    """Still ``simulator-only``. A contradicted assumption was checked, so it isn't counted here."""
+    return _unverified(assumptions)
+
+
+def contradicted(assumptions: Iterable[Assumption] = ASSUMPTIONS) -> list[Assumption]:
+    """Seen wrong on hardware (``hardware-contradicted``); the code was changed to stop relying on them."""
+    return _contradicted(assumptions)

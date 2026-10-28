@@ -24,12 +24,15 @@ explain the reasoning behind non-obvious changes instead of only making them.
   hub-qualified refs (`Den/Watch TV`), the first-call startup grace, bounded shutdown,
   `healthy_count`/`status_summary` (from `available`; they send nothing)
 - `src/harmony_mcp/server.py`: MCP tools, resources and a prompt (`MCPServer` from `mcp` 2.x)
-- `src/harmony_mcp/assumptions.py`: every unverified protocol claim (id, source, confidence, status)
+- `src/harmony_mcp/assumptions.py`: every unverified protocol claim (id, source, confidence, status); the
+  `Assumption` record and the queries are shared `registry.py`. `unverified()` is `simulator-only` only:
+  `hardware-contradicted` ones were checked, and `doctor` lists them apart
 - `src/harmony_mcp/limits.py`: this server's rate-limit numbers and per-call caps (the mechanism,
   `TokenBucket` and `refusal`, is shared `ratelimit.py`)
 - **Shared with the siblings; the source of truth is mcp-server-shared.** `src/harmony_mcp/remote.py`,
   `logsafe.py`, `tasks.py` (`stop_task`), `ratelimit.py`, `registry.py` (the assumption record and its
-  queries; not used here yet, `assumptions.py` still has its own), `scripts/sync_shared.py`, and
+  queries; `assumptions.py` is only Harmony's list, with `unverified()`/`contradicted()` defaulting the
+  shared queries to it), `scripts/sync_shared.py`, and
   `tests/test_remote.py`, `test_logsafe.py`, `test_tasks.py`, `test_ratelimit.py`, `test_registry.py`
   (rendered with this package's name); mcp-server-shared's
   `shared.toml` is the full list. Don't edit them here: change them in mcp-server-shared, then run
