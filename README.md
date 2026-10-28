@@ -51,10 +51,16 @@ wrong room.
 ## Install
 
 ```sh
-git clone https://github.com/SDNick484/mcp-server-harmony.git
-cd mcp-server-harmony
+python -m venv ~/.venvs/harmony && . ~/.venvs/harmony/bin/activate
+pip install mcp-server-harmony
+```
+
+From source instead (for the newest code, or to run the tests):
+
+```sh
+git clone https://github.com/SDNick484/mcp-server-harmony.git && cd mcp-server-harmony
 python -m venv .venv && . .venv/bin/activate
-pip install -e .
+pip install -e ".[dev]" && pytest
 ```
 
 Requires Python 3.11+.
@@ -307,7 +313,7 @@ aioharmony. `test_assumptions.py` fails if this table and `assumptions.py` disag
 
 - Validate on hardware ([HARDWARE_VALIDATION.md](HARDWARE_VALIDATION.md))
 - Surface activity changes as MCP resource updates, once the Claude apps support subscriptions
-- Publish to PyPI and the MCP registry
+- Publish to the MCP registry
 
 ## License
 
