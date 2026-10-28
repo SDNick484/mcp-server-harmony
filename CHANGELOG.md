@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-28
+
 ### Added
 
 - `power_off(force=true)`: sends the power off even while a hub is mid-sequence (a start stuck warming
