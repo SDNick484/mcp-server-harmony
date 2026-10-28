@@ -226,7 +226,9 @@ Two hubs that both have "Listen to Music". (Output from `simulate`, trimmed.)
   whole, never half-sent.
 - **Dry run.** `serve --dry-run` (or `call --dry-run`) reads the hubs and reports what it
   would send.
-- **Resilient.** Each hub reconnects with backoff, and re-reads its state after a reconnect.
+- **Resilient.** Each hub reconnects with backoff, and re-reads its state after a reconnect. If the
+  connection task itself crashes, it's logged and restarted (also with backoff) instead of leaving the
+  hub offline until the server restarts.
   An offline hub doesn't block the others, and shutdown is bounded per hub.
 - **Logs are redacted**: IP addresses and MACs (unless `--no-redact`), and always secrets (JWTs,
   bearer tokens, keys, URL passwords). They go to stderr; stdout is the MCP transport.

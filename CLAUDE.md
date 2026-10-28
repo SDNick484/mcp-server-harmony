@@ -16,9 +16,13 @@ explain the reasoning behind non-obvious changes instead of only making them.
 - `src/harmony_mcp/catalog.py`: the hub's config parsed into `Activity`/`Device`/`Command`;
   this is the allow-list. Pure data, no I/O
 - `src/harmony_mcp/client.py`: `HubClient`, one hub's long-lived connection plus pushed-state cache;
-  re-reads state after a reconnect; rate limits per hub; `stop()` ends its tasks with `stop_task`
+  re-reads state after a reconnect; `_connect_forever` restarts a crashed connection cycle with backoff;
+  `ping()` is an active round trip (a full `refresh_info_from_hub`, so not for every request);
+  `last_connected_at`/`reconnect_count` are diagnostics, not in `Status`; rate limits per hub; `stop()`
+  ends its tasks with `stop_task`
 - `src/harmony_mcp/hubs.py`: `HubRegistry`, all the hubs, the rule for which one a call means,
-  hub-qualified refs (`Den/Watch TV`), the first-call startup grace, bounded shutdown
+  hub-qualified refs (`Den/Watch TV`), the first-call startup grace, bounded shutdown,
+  `healthy_count`/`status_summary` (from `available`; they send nothing)
 - `src/harmony_mcp/server.py`: MCP tools, resources and a prompt (`MCPServer` from `mcp` 2.x)
 - `src/harmony_mcp/assumptions.py`: every unverified protocol claim (id, source, confidence, status)
 - `src/harmony_mcp/limits.py`: this server's rate-limit numbers and per-call caps (the mechanism,

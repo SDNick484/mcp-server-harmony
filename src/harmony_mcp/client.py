@@ -7,9 +7,12 @@ keeps the latest state for ``get_status``, and holds the parsed config
 (``Catalog``) that every tool validates against.
 
 The first connect runs in a background task with backoff, so the server starts
-(and answers ``get_status``) even when the hub is unreachable. After that,
-aioharmony reconnects on its own and tells us through the connect/disconnect
-callbacks.
+(and answers ``get_status``) even when the hub is unreachable. That task is
+supervised: if the connection cycle itself crashes (a bug, or something the
+library raises that we don't expect), it's logged and restarted with backoff
+rather than leaving the hub offline until the server restarts. After the first
+connect, aioharmony reconnects on its own and tells us through the
+connect/disconnect callbacks.
 """
 
 from __future__ import annotations
@@ -17,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Literal
@@ -141,6 +145,11 @@ class HubClient:
         self.activity_id: int | None = None
         self.starting_id: int | None = None
         self.catalog = Catalog()
+        # Connection health, for diagnostics; deliberately not in Status/snapshot() (the model doesn't need
+        # them, and get_status's outputSchema would change). Monotonic, so a wall-clock jump can't skew it.
+        self.last_connected_at: float | None = None
+        # Reconnects aioharmony reported, plus restarts after the connection task crashed.
+        self.reconnect_count = 0
 
     # --- lifecycle -----------------------------------------------------------
     @property
@@ -185,14 +194,29 @@ class HubClient:
         self.available = False
 
     async def _connect_forever(self) -> None:
-        # Nothing awaits this task until shutdown, so log a crash instead of
-        # letting it vanish.
-        try:
-            await self._connect()
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            log.exception("Harmony connection task crashed")
+        """Run the connection cycle, restarting it if it crashes.
+
+        Nothing awaits this task until shutdown, so an exception escaping _connect() used to end it
+        silently: one log line, then the hub stayed offline until the server restarted. Now an
+        unexpected exception is logged and the whole cycle (build the API, connect with backoff) starts
+        over, with its own backoff so a bug that crashes every time can't spin. Expected failures
+        (hub unreachable) never get here; _connect() retries those itself. CancelledError is shutdown
+        (stop()), so it always propagates.
+        """
+        delay = self.retry_delay
+        while True:
+            try:
+                await self._connect()
+                return
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                log.exception("%s: connection task crashed; restarting in %.0fs", self.name, delay)
+                # Don't make HubRegistry.ready() wait out its grace for a hub whose first try blew up.
+                self.tried.set()
+                await asyncio.sleep(delay)
+                delay = min(delay * 2, 60.0)
+                self.reconnect_count += 1
 
     async def _connect(self) -> None:
         callbacks = ClientCallbackType(
@@ -203,6 +227,16 @@ class HubClient:
             config_updated=self._on_config,
         )
         api = self._api_factory(ip_address=self.host, protocol=self.protocol, callbacks=callbacks)
+        try:
+            await self._establish(api)
+        except Exception:
+            # The supervisor will build a fresh API. Close this one first, or a half-set-up connection
+            # (aioharmony's own reconnect loop included) would live on beside the new one, and both would
+            # fire our callbacks.
+            await self._discard(api)
+            raise
+
+    async def _establish(self, api: Any) -> None:
         delay = self.retry_delay
         while True:
             try:
@@ -220,6 +254,7 @@ class HubClient:
         self.catalog = Catalog.from_config(api.config)
         self.activity_id = api.current_activity[0]
         self.available = True
+        self.last_connected_at = time.monotonic()
         self.tried.set()
         log.info(
             "Connected to %s at %s: %d activities, %d devices",
@@ -229,12 +264,44 @@ class HubClient:
             len(self.catalog.devices),
         )
 
+    async def _discard(self, api: Any) -> None:
+        if self._api is api:
+            self._api = None
+        # _on_connect may already have marked us available during connect().
+        self.available = False
+        with contextlib.suppress(Exception):
+            await api.close()
+
+    async def ping(self, timeout: float = 3.0) -> bool:
+        """Ask the hub for its state and say whether it answered within `timeout` seconds.
+
+        `available` only says the socket hasn't reported a drop; a half-open TCP connection (the hub
+        lost power, a switch rebooted) can look fine until something is sent. This sends something.
+        The round trip is aioharmony's refresh_info_from_hub (config, hub info, current activity), the
+        same private call _resync uses, so it costs a full config read: fine for an occasional probe,
+        too heavy to run on every request. It also fires config_updated, which reloads the catalog.
+        """
+        if self._api is None or not self.available:
+            return False
+        try:
+            async with asyncio.timeout(timeout):
+                if (inner := getattr(self._api, "_harmony_client", None)) is not None:
+                    await inner.refresh_info_from_hub()
+                if self._api is None or self._api.current_activity is None:
+                    return False
+                return bool(self.available)
+        except Exception:  # TimeoutError included; CancelledError isn't an Exception, so it propagates
+            return False
+
     # --- callbacks (called by aioharmony with one argument) -------------------
     def _on_connect(self, _ip: object) -> None:
         # aioharmony calls this on the first connect (before _connect has set
         # self._api) and again after each automatic reconnect.
         reconnected = self._api is not None and not self.available
         self.available = True
+        self.last_connected_at = time.monotonic()
+        if reconnected:
+            self.reconnect_count += 1
         if reconnected and (self._resync_task is None or self._resync_task.done()):
             self._resync_task = asyncio.ensure_future(self._resync())
 
