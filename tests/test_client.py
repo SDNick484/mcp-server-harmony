@@ -8,10 +8,10 @@ import pytest
 from aioharmony.exceptions import TimeOut
 
 from harmony_mcp.client import HarmonyError, HubClient
-from harmony_mcp.config import HubSettings
+from harmony_mcp.config import HubSettings, load_settings
 from harmony_mcp.hubs import HubRegistry
 
-from .conftest import LIVING, ONKYO, WATCH_SHIELD, FakeHarmonyAPI, wait_until
+from .conftest import DEN, LIVING, ONKYO, WATCH_SHIELD, FakeHarmonyAPI, wait_until
 
 pytestmark = pytest.mark.anyio
 
@@ -233,3 +233,100 @@ async def test_a_task_dropping_two_cancels_cannot_hang_registry_shutdown(setting
         hub.network.drops = 0  # whatever happened, let the next cancel through so the loop can close
         stopping.cancel()
         await asyncio.wait({stopping}, timeout=1)
+
+
+# --- supervision and health ---------------------------------------------------------------------
+class CrashesOnce(FakeHarmonyAPI):
+    """connect() raises something _connect() doesn't expect (a bug, not "unreachable"), once."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.close_calls = 0
+
+    async def connect(self) -> bool:
+        self.connect_calls += 1
+        if self.connect_calls == 1:
+            raise RuntimeError("library bug")
+        return True
+
+    async def close(self) -> None:
+        self.close_calls += 1
+        await super().close()
+
+
+async def test_connection_task_restarts_after_a_crash(caplog):
+    hub = CrashesOnce()
+    c = HubClient(HubSettings(LIVING), api_factory=hub.build)
+    await c.start()
+    await wait_until(lambda: c.available)
+    # It came back on its own: the crashed cycle's API was closed, and a second cycle connected.
+    assert hub.connect_calls == 2 and hub.close_calls == 1
+    assert c.reconnect_count == 1 and c.tried.is_set()
+    assert c.last_connected_at is not None
+    # The second cycle succeeded, so the supervisor finished cleanly (aioharmony owns reconnects from here).
+    assert c._task is not None and c._task.done() and c._task.exception() is None
+    assert "connection task crashed; restarting" in caplog.text
+    await c.stop()
+
+
+async def test_reconnect_after_a_drop_is_counted(hub, fake):
+    first = hub.last_connected_at
+    assert hub.reconnect_count == 0 and first is not None
+    fake.push_disconnect()
+    assert fake.callbacks is not None
+    fake.callbacks.connect(LIVING)  # aioharmony's own reconnect
+    assert hub.available and hub.reconnect_count == 1
+    assert hub.last_connected_at is not None and hub.last_connected_at >= first
+
+
+class Refresh:
+    """HarmonyAPI._harmony_client: counts refreshes, or never answers."""
+
+    def __init__(self, hangs: bool = False) -> None:
+        self.hangs = hangs
+        self.calls = 0
+
+    async def refresh_info_from_hub(self) -> None:
+        self.calls += 1
+        if self.hangs:
+            await asyncio.sleep(3600)
+
+
+async def test_ping_asks_the_hub(hub, fake):
+    fake._harmony_client = Refresh()
+    assert await hub.ping() is True
+    assert fake._harmony_client.calls == 1
+
+
+async def test_ping_fails_fast_when_disconnected(hub, fake):
+    fake._harmony_client = Refresh()
+    fake.push_disconnect()
+    assert await hub.ping() is False
+    assert fake._harmony_client.calls == 0  # nothing sent on a socket known to be down
+
+
+async def test_ping_fails_when_the_hub_doesnt_answer(hub, fake):
+    fake._harmony_client = Refresh(hangs=True)
+    loop = asyncio.get_running_loop()
+    began = loop.time()
+    assert await hub.ping(timeout=0.05) is False
+    assert loop.time() - began < 1
+
+
+async def test_ping_fails_after_stop(fake):
+    c = HubClient(HubSettings(LIVING), api_factory=fake.build)
+    assert await c.ping() is False  # never connected
+    await c.start()
+    await wait_until(lambda: c.available)
+    await c.stop()
+    assert await c.ping() is False
+
+
+async def test_registry_health_summary(fakes, factory, two_hubs):
+    fakes[DEN].connect_results = [False] * 1000  # the Den is unreachable
+    reg = HubRegistry(load_settings(), factory)
+    await reg.start()
+    await wait_until(lambda: reg.hubs[0].available)
+    assert reg.healthy_count == 1
+    assert reg.status_summary == {"total": 2, "online": ["Living Room"], "offline": ["Den"]}
+    await reg.stop()

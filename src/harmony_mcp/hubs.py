@@ -24,7 +24,7 @@ import asyncio
 import contextlib
 import logging
 from collections.abc import Callable
-from typing import TypeVar
+from typing import Any, TypeVar
 
 import aioharmony.hubconnector_websocket as ws_connector
 from aioharmony.harmonyapi import HarmonyAPI
@@ -96,6 +96,22 @@ class HubRegistry:
 
         with contextlib.suppress(Exception):
             await asyncio.gather(*(stop_one(h) for h in self.hubs))
+
+    # --- health ----------------------------------------------------------------------
+    # From each hub's `available` (the socket is up), so they're instant and send nothing; HubClient.ping
+    # is the active check.
+    @property
+    def healthy_count(self) -> int:
+        return sum(1 for h in self.hubs if h.available)
+
+    @property
+    def status_summary(self) -> dict[str, Any]:
+        """Online vs offline hubs by name, e.g. {"total": 2, "online": ["Den"], "offline": ["Living Room"]}."""
+        return {
+            "total": len(self.hubs),
+            "online": [h.name for h in self.hubs if h.available],
+            "offline": [h.name for h in self.hubs if not h.available],
+        }
 
     # --- choosing hubs -------------------------------------------------------------
     def names(self) -> str:
