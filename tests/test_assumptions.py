@@ -14,7 +14,9 @@ from pathlib import Path
 
 import pytest
 
-from harmony_mcp.assumptions import ASSUMPTIONS, BY_ID
+from harmony_mcp import registry
+from harmony_mcp.assumptions import ASSUMPTIONS, BY_ID, Assumption, contradicted, unverified
+from harmony_mcp.doctor import Report, render
 
 ROOT = Path(__file__).parent.parent
 ID = re.compile(r"\bH-[A-Z0-9]+(?:-[A-Z0-9]+)*\b")
@@ -52,3 +54,40 @@ def test_code_cites_only_real_ids_and_every_id_is_used():
     cited = cited_in(code)
     assert cited <= set(BY_ID), cited - set(BY_ID)
     assert set(BY_ID) <= cited, f"assumptions nothing cites: {set(BY_ID) - cited}"
+
+
+# --- the shared registry (registry.py) is the machinery ---------------------------------------
+SAMPLE = (
+    Assumption("H-X", "claim", "source", "low"),
+    Assumption("H-Y", "claim", "source", "high", status="hardware-contradicted", note="saw otherwise"),
+    Assumption("H-Z", "claim", "source", "high", status="hardware-verified"),
+)
+
+
+def test_the_record_is_the_shared_one():
+    assert Assumption is registry.Assumption
+    assert registry.by_id(ASSUMPTIONS) == BY_ID
+
+
+def test_a_contradicted_assumption_is_not_unverified():
+    # The local query this replaced counted everything but hardware-verified, contradicted included.
+    assert [a.id for a in unverified(SAMPLE)] == ["H-X"]
+    assert [a.id for a in contradicted(SAMPLE)] == ["H-Y"]
+
+
+def test_queries_default_to_this_servers_list():
+    assert unverified() == [a for a in ASSUMPTIONS if a.status == "simulator-only"]
+    assert contradicted() == [a for a in ASSUMPTIONS if a.status == "hardware-contradicted"]
+
+
+def test_a_typo_in_a_status_fails_at_import_time():
+    with pytest.raises(ValueError, match="hardware-verfied"):
+        Assumption("H-X", "claim", "source", "low", status="hardware-verfied")  # type: ignore[arg-type]
+
+
+def test_doctor_lists_contradicted_apart_from_unverified():
+    report = Report({}, [], [], [], unverified_assumptions=["H-X"], contradicted_assumptions=["H-Y"])
+    text = render(report)
+    assert "1 protocol assumptions not yet confirmed on hardware: H-X" in text
+    assert "1 contradicted on hardware, no longer relied on: H-Y" in text
+    assert "contradicted" not in render(Report({}, [], [], [], unverified_assumptions=["H-X"]))

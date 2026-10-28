@@ -32,7 +32,7 @@ import aioharmony.hubconnector_websocket as ws_connector
 import aiohttp
 from aioharmony.harmonyapi import HarmonyAPI
 
-from .assumptions import unverified
+from .assumptions import contradicted, unverified
 from .catalog import Catalog
 from .config import HubSettings, Settings
 from .logsafe import redact
@@ -70,6 +70,8 @@ class Report:
     hubs: list[HubReport]
     warnings: list[str]
     unverified_assumptions: list[str]
+    # Checked on hardware and found wrong. Listed apart from the unverified ones: each changed the code.
+    contradicted_assumptions: list[str] = field(default_factory=list)
 
     @property
     def ok(self) -> bool:
@@ -242,6 +244,7 @@ async def run_doctor(settings: Settings, timeout: float = 10.0, dump_dir: Path |
         hubs=hub_reports,
         warnings=warnings,
         unverified_assumptions=[a.id for a in unverified()],
+        contradicted_assumptions=[a.id for a in contradicted()],
     )
 
 
@@ -266,6 +269,11 @@ def render(report: Report) -> str:
         + ", ".join(report.unverified_assumptions)
         + " (see HARDWARE_VALIDATION.md)"
     )
+    if report.contradicted_assumptions:
+        lines.append(
+            f"{len(report.contradicted_assumptions)} contradicted on hardware, no longer relied on: "
+            + ", ".join(report.contradicted_assumptions)
+        )
     lines.append("All checks passed." if report.ok else "Some checks failed; see the -> hints above.")
     return redact("\n".join(lines))
 

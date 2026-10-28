@@ -25,7 +25,9 @@ pytest -q          # expect: all passed, 1 skipped (no recordings yet)
 
 **Recording a result.** When a step confirms an assumption, set its `status` to
 `"hardware-verified"` in `assumptions.py`. When it contradicts one, set
-`"hardware-contradicted"`, put what you saw in `note`, and keep the output. Commit both.
+`"hardware-contradicted"`, put what you saw in `note`, and keep the output. Commit both. A
+misspelled status fails at import, and `doctor` then lists a contradicted assumption on its own line
+rather than counting it as unconfirmed (it was checked, and the code should no longer rely on it).
 
 **Tool calls** use `mcp-server-harmony call <tool> key=value ...`. It runs the tool through the
 same MCP layer the model uses. `--dry-run` shows what would be sent. `call tools` lists the
