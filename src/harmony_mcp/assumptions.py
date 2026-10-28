@@ -103,6 +103,15 @@ ASSUMPTIONS: tuple[Assumption, ...] = (
         "medium",
     ),
     Assumption(
+        "H-FORCE-OFF",
+        "runactivity -1 sent while another activity's start sequence is running interrupts it: the hub stops "
+        "that sequence, runs its power off, and ends on PowerOff (-1). The interrupted start's own request may "
+        "then get a late reply, success or failure.",
+        "none: aioharmony allows the overlap (each runactivity has its own msgid, no lock); the fake hub just "
+        "runs the power off",
+        "low",
+    ),
+    Assumption(
         "H-PRESS-SILENT",
         "holdAction press/release gets no reply on success, only on failure.",
         "aioharmony send_commands comment ('the HUB sends a message back if there is an issue')",

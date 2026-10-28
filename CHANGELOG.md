@@ -1,5 +1,21 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- `power_off(force=true)`: sends the power off even while a hub is mid-sequence (a start stuck warming
+  up), skipping the busy guard and the already-off shortcut. Still rate limited; a start it overtakes
+  reports "interrupted" instead of restoring its activity. New assumption `H-FORCE-OFF`.
+- `serve --http`: `/healthz` returns 503 when no hub is connected (it was always 200).
+- `HubClient.ping()`, an active round trip to the hub, and `HubRegistry.healthy_count` /
+  `status_summary`; `last_connected_at` and `reconnect_count` diagnostics on each hub.
+
+### Fixed
+
+- A crash inside a hub's connection task no longer leaves that hub offline until the server restarts:
+  the task logs it, closes the half-made connection and starts over with backoff.
+
 ## [0.1.0] - 2026-10-28
 
 First release on PyPI.

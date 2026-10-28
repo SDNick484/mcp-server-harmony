@@ -248,17 +248,22 @@ async def power_off(
         str | None,
         Field(description=f"Hub name, or '{ALL}' for every hub. Omit when only one hub is on."),
     ] = None,
+    force: Annotated[bool, Field(description="Force power-off even if an activity sequence is in progress.")] = False,
 ) -> PowerOffResult:
     """Run a hub's power-off, turning off every device in its running activity.
 
     With no hub and several hubs on, this asks which; hub='all' turns off every one and reports each hub
     separately (one unreachable hub doesn't stop the others).
+
+    force=True is for a hub stuck mid-sequence (get_status shows a transition that never clears): it sends
+    the power off anyway. Use it only after a normal power_off was refused as busy. Without hub it acts on
+    hubs that are on or mid-sequence; to force one that reports off, name it.
     """
     targets = (await ready_hubs()).to_power_off(hub)
     results: list[ActionResult] = []
     for h in targets:
         try:
-            outcome = await h.power_off()
+            outcome = await h.power_off(force=force)
             results.append(_result(h, outcome, f"power off {h.name}", f"{h.name} was already off"))
         except HarmonyError as exc:
             if len(targets) == 1:

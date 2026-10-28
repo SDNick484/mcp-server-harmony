@@ -43,7 +43,8 @@ take an optional `hub`, and the model only needs it when a name is ambiguous:
   TVs on, `send_command("VolumeUp")` asks which.
 - **`power_off`** turns off the one hub that's on, asks if several are, and takes `hub="all"`
   for every one. With `all`, each hub is reported separately, so one unreachable hub doesn't
-  stop the others.
+  stop the others. `force=true` is the escape hatch for a hub stuck mid-sequence: it sends the
+  power off even while busy (see [Safety design](#safety-design)).
 
 The server never guesses between hubs: each one is a different TV, and a guess turns off the
 wrong room.
@@ -108,6 +109,10 @@ CF_ACCESS_TEAM_DOMAIN=<team>.cloudflareaccess.com CF_ACCESS_AUD=<aud tag> \
   mcp-server-harmony serve --http --public-host mcp.example.com     # 127.0.0.1:8713/harmony/mcp
 ```
 
+`GET /healthz` answers 200 while at least one hub is connected and 503 when none is (or before
+the server has started), for a load balancer or `supervise-daemon` check. It doesn't contact the
+hubs, and it's answered before the Access check, so its body is only `{"status": ...}`.
+
 Every request must carry a valid Access JWT (`Cf-Access-Jwt-Assertion`). The checks and the
 flags are documented in `src/harmony_mcp/remote.py`. The Host-header (DNS-rebinding) checks stay on
 even with `--bind 0.0.0.0`: for LAN clients, also pass `--public-host <this machine's LAN IP>`.
@@ -168,7 +173,7 @@ startup and by `doctor`.
 | `list_devices`    | Devices on each hub, with `ref`, manufacturer, model and command count                          |
 | `list_commands`   | Commands for an activity or device (default: the running activity), and which device gets each  |
 | `start_activity`  | Start an activity and wait until its hub finishes; `unchanged` if it's already running          |
-| `power_off`       | Run a hub's power-off (or `hub="all"`); `unchanged` if it's already off                         |
+| `power_off`       | Run a hub's power-off (or `hub="all"`); `unchanged` if it's already off; `force` sends it anyway |
 | `send_command`    | Press a command 1-10 times (`repeat`), optionally held (`hold_ms`) or spaced (`delay_ms`)      |
 
 Every tool except `get_status` takes an optional `hub`. Actions return
@@ -225,7 +230,11 @@ Two hubs that both have "Listen to Music". (Output from `simulate`, trimmed.)
   that edits the hub's configuration.
 - **No interleaving with activity sequences.** While a hub is starting an activity or powering
   off, its commands are refused with "busy, try again", since a press mid-sequence can land on
-  a device that's still warming up.
+  a device that's still warming up. The one exception is `power_off(force=true)`, for a sequence
+  that never finishes (a device that never answers its warm-up): it sends the power off anyway,
+  like holding Off on the remote. It still counts against the rate limit, and with no `hub` it
+  only acts on hubs that are on or mid-sequence. What the hub does with a power off mid-sequence
+  is `H-FORCE-OFF`, not yet seen on hardware.
 - **Rate limits and caps, per hub.** Per call: at most 10 repeats, held up to 3 s, 100-2000 ms
   apart, 15 s in total. Across calls (a model in a loop): 20 presses in a burst, then 4 a
   second; 4 activity changes in a burst, then one per 15 s. A call over the limit is refused
@@ -249,7 +258,7 @@ Two hubs that both have "Listen to Music". (Output from `simulate`, trimmed.)
 | `No Harmony hub configured.`                              | Run `check --host <ip>` once per hub, or set `HARMONY_HOSTS` (in the client's config)         |
 | `Can't reach the Harmony hub 'Den' at ...`                | Offline, its IP changed, or TCP 8088 is blocked (a VLAN in between). Other hubs keep working |
 | `... exists on Living Room, Den; pass hub to choose.`     | The name is on more than one hub: the model should ask which TV, or use a ref                |
-| `Den is busy starting ...`                                | An activity is mid-sequence. Wait until `get_status` shows `transition: null` for that hub   |
+| `Den is busy starting ...`                                | An activity is mid-sequence. Wait until `get_status` shows `transition: null`; if it never clears, `power_off(force=true)` |
 | `Rate limit: refusing to ...`                             | Many presses in a short time. Wait and retry if it was deliberate                            |
 
 `doctor` says which layer failed for each hub and what to check.
@@ -300,6 +309,7 @@ the rest are verified against the simulator only:
 | `H-POWEROFF`       | high       | hardware-verified |
 | `H-NAME`           | high       | hardware-verified |
 | `H-START-SEQUENCE` | medium     | simulator-only |
+| `H-FORCE-OFF`      | low        | simulator-only |
 | `H-PRESS-SILENT`   | medium     | simulator-only |
 | `H-PRESS-ERROR`    | low        | simulator-only |
 | `H-HOLD`           | low        | simulator-only |
