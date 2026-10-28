@@ -37,7 +37,8 @@ explain the reasoning behind non-obvious changes instead of only making them.
   `python scripts/sync_shared.py --check` (CI's `shared-drift` job) fails on any difference from the
   locked commit; a weekly scheduled run also fails once mcp-server-shared `main` has moved past it.
 - `src/harmony_mcp/discovery.py` (SSDP), `doctor.py`, `cli.py`: `serve` (default), `check`,
-  `call`, `discover`, `doctor`, `simulate`
+  `call`, `discover`, `doctor`, `simulate`; `cli.check_health` is `serve --http`'s `/healthz` (any hub
+  `available`; a bare bool, since `/healthz` is answered before the Access check)
 - `src/harmony_mcp/sim/fake_hub.py` + `fixtures/`: a wire-level fake hub (aiohttp) that the real
   aioharmony talks to; used by tests *and* `simulate`
 - `deploy/alpine/`: OpenRC service, install script and the container smoke test CI runs; same
@@ -65,6 +66,8 @@ explain the reasoning behind non-obvious changes instead of only making them.
   control groups, so the model doesn't need to know which device handles volume.
 - Commands are refused (per hub) while `starting_id` is set (an activity's start/power-off
   sequence is running). Keep that guard: a press mid-sequence can hit a device still warming up.
+  The only bypass is `power_off(force=True)` (ASSUMPTION H-FORCE-OFF), which still takes a rate-limit
+  token. A start it overtakes raises "interrupted" instead of writing its state back (`_runs`).
 - Raise `HarmonyError` (a `ToolError`) for anything the model or user can act on.
 - **Don't invent protocol details.** Anything not confirmed on hardware is an `Assumption`, cited
   as `# ASSUMPTION <id>` where code depends on it, in README's table and HARDWARE_VALIDATION.md.

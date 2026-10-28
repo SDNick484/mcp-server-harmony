@@ -150,6 +150,9 @@ class HubClient:
         self.last_connected_at: float | None = None
         # Reconnects aioharmony reported, plus restarts after the connection task crashed.
         self.reconnect_count = 0
+        # Bumped by each _run_activity. A forced power off can overtake a start that is still waiting for its
+        # sequence; when that start returns, the counter tells it a later run owns the state now.
+        self._runs = 0
 
     # --- lifecycle -----------------------------------------------------------
     @property
@@ -387,11 +390,21 @@ class HubClient:
         self._limit(self.activity_bucket, 1, f"start {activity.name}")
         return await self._run_activity(api, activity.activity_id, activity.name)
 
-    async def power_off(self) -> Outcome:
-        """Run the hub's power-off sequence. Unchanged when everything is already off."""
-        api = self._require_idle("power off")
-        if self.activity_id == POWER_OFF_ID:
-            return Outcome(changed=False)
+    async def power_off(self, force: bool = False) -> Outcome:
+        """Run the hub's power-off sequence. Unchanged when everything is already off.
+
+        force: send it regardless, the way you'd hold the remote's Off button when a start hangs. It skips
+            the busy guard (an activity sequence still running, perhaps stuck waiting on a device) and the
+            already-off shortcut (our state can be wrong after a hub hiccup), and sends runactivity -1
+            straight away. The rate limit still applies. What the hub does with a power off in the middle
+            of a sequence is ASSUMPTION H-FORCE-OFF.
+        """
+        if force:  # ASSUMPTION H-FORCE-OFF
+            api = self._require()
+        else:
+            api = self._require_idle("power off")
+            if self.activity_id == POWER_OFF_ID:
+                return Outcome(changed=False)
         self._limit(self.activity_bucket, 1, "power off")
         return await self._run_activity(api, POWER_OFF_ID, "power off")
 
@@ -401,6 +414,8 @@ class HubClient:
         if self.dry_run:
             log.info("[dry-run] %s: would send %s", self.name, sent[0])
             return Outcome(changed=False, dry_run=True, sent=sent)
+        self._runs += 1
+        run = self._runs
         try:
             async with asyncio.timeout(self.activity_timeout):
                 ok, msg = await api.start_activity(activity_id)
@@ -409,6 +424,10 @@ class HubClient:
                 f"{self.name} didn't finish '{what}' within {self.activity_timeout:.0f}s. It may still be running; "
                 "check get_status before retrying."
             ) from exc
+        if run != self._runs:
+            # A later run (a forced power off) was sent while this one waited. Its state is the truth; ours
+            # would put back an activity the hub has since turned off.
+            raise HarmonyError(f"{self.name}: '{what}' was interrupted by a later power off; check get_status.")
         if not ok:
             raise HarmonyError(f"{self.name} refused '{what}': {msg or 'no reason given'}")
         # The pushed "new activity" normally arrives before start_activity

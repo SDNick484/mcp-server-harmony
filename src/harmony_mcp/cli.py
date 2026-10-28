@@ -220,6 +220,27 @@ async def _cmd_call(args: argparse.Namespace) -> int:
     return 0
 
 
+# --- serve --http ---------------------------------------------------------------------------
+async def check_health() -> bool:
+    """/healthz for `serve --http`: healthy while at least one hub is connected.
+
+    The server's lifespan creates the hubs, so before it has run (or after shutdown) there are none and
+    the answer is unhealthy. ready() lets a probe that arrives during startup wait out the same short
+    grace the first tool call gets, instead of failing because the hubs are still connecting.
+
+    It reads `available` and sends nothing to the hubs, so a load balancer can poll it often. It returns
+    a bare bool on purpose: /healthz is answered before the Cloudflare Access check, so anything in its
+    body (hub names, say) would be public.
+    """
+    from . import server
+
+    hubs = server._hubs
+    if hubs is None or not hubs.hubs:
+        return False
+    await hubs.ready()
+    return any(h.available for h in hubs.hubs)
+
+
 # --- main ---------------------------------------------------------------------------------
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="mcp-server-harmony", description="MCP server for Logitech Harmony Hubs")
@@ -295,7 +316,7 @@ def main(argv: list[str] | None = None) -> None:
 
     if getattr(args, "http", False):
         try:
-            remote.serve_http(mcp, remote.http_config(args))
+            remote.serve_http(mcp, remote.http_config(args), health_check=check_health)
         except remote.ConfigError as exc:
             parser.exit(2, f"mcp-server-harmony: {exc}\n")
     else:

@@ -173,7 +173,18 @@ mcp-server-harmony call power_off hub="$HUB" # that TV turns off
 mcp-server-harmony call power_off hub=all    # the other one (hubs that are already off aren't listed)
 ```
 
-Confirms: **H-POWEROFF**.
+Then the forced power off. Start an activity *from the physical remote* and, while the TV is
+still powering on, run:
+
+```sh
+mcp-server-harmony -v call power_off hub="$HUB" force=true
+```
+
+Everything in that activity should end up off, and `call get_status` should show `power: off`
+and `transition: null`. Write down what the `-v` log shows for the interrupted start (did the
+hub reply to it at all, and with which code), and whether any device was left on.
+
+Confirms: **H-POWEROFF**, **H-FORCE-OFF** (record the reply and any device left on in `note`).
 
 ## 9. With Claude: config changes and reconnects
 
@@ -216,6 +227,7 @@ Confirms: **H-CONFIG-PUSH** (step 2), **H-RECONNECT** (step 3).
 | `H-POWEROFF`       | 8    | high              |                                                           |
 | `H-NAME`           | 2    | high              |                                                           |
 | `H-START-SEQUENCE` | 5    | medium            | the order of frames, from the `-v` log                    |
+| `H-FORCE-OFF`      | 8    | low               | needs a start from the physical remote in progress        |
 | `H-PRESS-SILENT`   | 6    | medium            |                                                           |
 | `H-PRESS-ERROR`    | none | low               | can't be triggered with commands from the hub's own config |
 | `H-HOLD`           | 7    | low               | record which behavior you saw                             |

@@ -7,10 +7,11 @@ test_multi_hub.py covers what changes with two hubs.
 
 from __future__ import annotations
 
+import httpx2
 import pytest
 from mcp import Client
 
-from harmony_mcp import server
+from harmony_mcp import cli, remote, server
 from harmony_mcp.hubs import HubRegistry
 
 from .conftest import LIVING, ONKYO, SHIELD, WATCH_SHIELD, wait_until
@@ -166,6 +167,60 @@ async def test_power_off(mcp_client, fake):
     await mcp_client.call_tool("start_activity", {"activity": "Watch Shield"})
     assert outcomes(await mcp_client.call_tool("power_off", {})) == [("Living Room", "done")]
     assert fake.started == [WATCH_SHIELD, -1]
+
+
+async def test_power_off_force_breaks_a_stuck_start(mcp_client, fake):
+    fake.push_starting(WATCH_SHIELD)  # a start from the physical remote, stuck warming up
+    busy = await mcp_client.call_tool("power_off", {})
+    assert busy.is_error and "busy starting Watch Shield" in text(busy)
+    assert outcomes(await mcp_client.call_tool("power_off", {"force": True})) == [("Living Room", "done")]
+    assert fake.started == [-1]
+    status = server.hubs().hubs[0].snapshot()
+    assert status["power"] == "off" and status["transition"] is None
+
+
+async def test_power_off_force_resends_during_a_power_off(mcp_client, fake):
+    # Already off, and a power-off sequence is "running": without force that's busy, and when idle it's a
+    # no-op. With force the power off goes out regardless.
+    fake.push_starting(-1)
+    busy = await mcp_client.call_tool("power_off", {})
+    assert busy.is_error and "busy powering off" in text(busy)
+    assert outcomes(await mcp_client.call_tool("power_off", {"force": True})) == [("Living Room", "done")]
+    assert fake.started == [-1]
+    assert server.hubs().hubs[0].starting_id is None
+
+
+async def test_power_off_force_on_a_hub_that_looks_off_needs_its_name(mcp_client, fake):
+    # Our state can be wrong (say the TV came on by itself). Forcing then sends the power off anyway, but
+    # only to a named hub: with no hub, power_off acts on hubs that are on or mid-sequence, never a guess.
+    assert outcomes(await mcp_client.call_tool("power_off", {"force": True})) == []
+    named = await mcp_client.call_tool("power_off", {"hub": "Living Room", "force": True})
+    assert outcomes(named) == [("Living Room", "done")]
+    assert fake.started == [-1]
+
+
+# --- /healthz under serve --http -----------------------------------------------
+async def healthz() -> httpx2.Response:
+    app = remote.build_app(server.mcp, remote.HttpConfig(), health_check=cli.check_health)
+    async with httpx2.AsyncClient(transport=httpx2.ASGITransport(app=app), base_url="http://127.0.0.1") as http:
+        return await http.get(remote.HEALTH_PATH)
+
+
+async def test_healthz_is_ok_while_a_hub_is_connected(mcp_client):
+    resp = await healthz()
+    assert resp.status_code == 200 and resp.json() == {"status": "ok"}
+
+
+async def test_healthz_is_degraded_when_every_hub_is_offline(mcp_client, fake):
+    fake.push_disconnect()
+    resp = await healthz()
+    assert resp.status_code == 503 and resp.json()["status"] == "degraded"
+    assert "Living Room" not in resp.text  # the endpoint is public: no hub names
+
+
+async def test_healthz_is_degraded_before_the_server_has_started():
+    assert server._hubs is None
+    assert (await healthz()).status_code == 503
 
 
 async def test_send_command_routes_through_the_activity(mcp_client, fake):

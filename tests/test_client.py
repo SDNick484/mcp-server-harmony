@@ -330,3 +330,50 @@ async def test_registry_health_summary(fakes, factory, two_hubs):
     assert reg.healthy_count == 1
     assert reg.status_summary == {"total": 2, "online": ["Living Room"], "offline": ["Den"]}
     await reg.stop()
+
+
+class HeldStart(FakeHarmonyAPI):
+    """A start whose sequence doesn't finish until the test says so; power off goes through at once."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.release = asyncio.Event()
+
+    async def start_activity(self, activity_id: int) -> tuple[bool, str | None]:
+        if activity_id == -1:
+            return await super().start_activity(activity_id)
+        self.started.append(activity_id)
+        assert self.callbacks is not None
+        self.callbacks.new_activity_starting((activity_id, None))
+        await self.release.wait()
+        return True, "OK"
+
+
+async def test_a_start_overtaken_by_a_forced_power_off_leaves_the_hub_off():
+    fake = HeldStart()
+    c = HubClient(HubSettings(LIVING), api_factory=fake.build)
+    c.activity_timeout = 5
+    await c.start()
+    await wait_until(lambda: c.available)
+    activity = c.catalog.activity_by_id(WATCH_SHIELD)
+    assert activity is not None
+    starting = asyncio.create_task(c.start_activity(activity))
+    await wait_until(lambda: c.starting_id == WATCH_SHIELD)
+    assert (await c.power_off(force=True)).changed
+    assert c.activity_id == -1
+    fake.release.set()  # the old start's reply arrives late, reporting success
+    with pytest.raises(HarmonyError, match="interrupted by a later power off"):
+        await starting
+    assert c.activity_id == -1 and c.starting_id is None  # still off, not put back to Watch Shield
+    await c.stop()
+
+
+async def test_force_still_respects_the_rate_limit(hub, fake):
+    for _ in range(20):
+        try:
+            await hub.power_off(force=True)
+        except HarmonyError as exc:
+            assert "power off" in str(exc)
+            break
+    else:
+        raise AssertionError("forced power offs were never rate limited")
