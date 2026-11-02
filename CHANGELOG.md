@@ -11,6 +11,8 @@
 
 - **Network Topology Masking:** Internal hub LAN IPv4 addresses in `harmony_get_status` payloads are sanitized with `mask_ip` (e.g. `192.0.2.20` -> `x.x.x.20`) to prevent leaking local network topology to LLMs over stdout.
 
+## [0.2.0] - 2026-10-28
+
 ### Added
 
 - `power_off(force=true)`: sends the power off even while a hub is mid-sequence (a start stuck warming
