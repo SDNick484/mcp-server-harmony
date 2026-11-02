@@ -47,6 +47,7 @@ Why it works the way it does:
 from __future__ import annotations
 
 import argparse
+import ast
 import contextlib
 import difflib
 import os
@@ -225,7 +226,11 @@ class LocalDir:
 
     def read(self, path: str) -> bytes:
         try:
-            return (self.root / path).read_bytes()
+            root_resolved = self.root.resolve()
+            target = (root_resolved / path).resolve()
+            if not target.is_relative_to(root_resolved):
+                raise SyncError(f"{path} resolves outside {self.root}")
+            return target.read_bytes()
         except OSError as exc:
             raise SyncError(f"{self.root / path}: {exc.strerror}") from None
 
@@ -289,8 +294,17 @@ def wanted_files(
                 f"{MANIFEST} in {source.label} is format {fmt}, newer than this script ({FORMAT}). "
                 "Run the same command without --check: it brings in the newer script, then run this again."
             )
-        (root / SELF).parent.mkdir(parents=True, exist_ok=True)
-        (root / SELF).write_bytes(source.read(SELF))
+        new_script = source.read(SELF)
+        try:
+            ast.parse(new_script.decode("utf-8"), filename=SELF)
+        except (UnicodeDecodeError, SyntaxError) as exc:
+            raise SyncError(f"refusing to update {SELF}: invalid Python syntax ({exc})") from None
+        root_resolved = root.resolve()
+        self_path = (root_resolved / SELF).resolve()
+        if not self_path.is_relative_to(root_resolved):
+            raise SyncError(f"refusing to write {SELF}: resolves outside {root}")
+        self_path.parent.mkdir(parents=True, exist_ok=True)
+        self_path.write_bytes(new_script)
         raise SyncError(f"Updated {SELF} for {MANIFEST} format {fmt}. Run the same command again.")
     # A typo ("remot") would otherwise exclude nothing, silently. So would a module that was renamed
     # or dropped in mcp-server-shared: then this lock's exclude is out of date and should say so.
@@ -331,9 +345,12 @@ def differences(root: Path, files: dict[str, bytes]) -> list[tuple[str, str]]:
 def write_files(root: Path, files: dict[str, bytes], *, dry_run: bool = False) -> list[str]:
     """Write the copies that differ; return their paths. Unchanged files are left alone (and their mtimes)."""
     changed = []
+    root_resolved = root.resolve()
     for target, status in differences(root, files):
         if not dry_run:
-            path = root / target
+            path = (root_resolved / target).resolve()
+            if not path.is_relative_to(root_resolved):
+                raise SyncError(f"refusing to write {target}: resolves outside {root}")
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(files[target])  # bytes, so no newline translation: copies stay byte-identical
         changed.append(f"{target} ({'added' if status == 'missing' else 'updated'})")
@@ -401,13 +418,17 @@ def report(root: Path, files: dict[str, bytes], label: str, fix: str) -> int:
     return 1
 
 
+def _gha_escape(text: str) -> str:
+    return text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+
+
 def _print_report(root: Path, files: dict[str, bytes], found: list[tuple[str, str]], label: str, fix: str) -> None:
     annotate = os.environ.get("GITHUB_ACTIONS") == "true"
     print(f"shared files: {len(found)} of {len(files)} don't match {label}:")
     for target, status in found:
         print(f"  {target}: {status}  -> fix: {fix}")
         if annotate:  # shows on the file in the PR's "Files changed" view
-            print(f"::error file={target}::{target} {status} from {label}. Fix: {fix}")
+            print(f"::error file={_gha_escape(target)}::{_gha_escape(f'{target} {status} from {label}. Fix: {fix}')}")
     print(
         f"\nFix them all with `{fix}`. If you meant to change a shared file, make the change in "
         "mcp-server-shared instead, push it to main, then run `python scripts/sync_shared.py --update` here."

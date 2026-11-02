@@ -53,6 +53,8 @@ class Assumption:
     def __post_init__(self) -> None:
         # The Literal types only bind under mypy. Checked here too, so a typo'd status in a sibling's
         # ASSUMPTIONS ("hardware-verfied") fails at import rather than quietly matching no query.
+        if not self.id.strip() or not self.claim.strip() or not self.source.strip():
+            raise ValueError(f"assumption {self.id!r}: id, claim and source must be non-empty")
         if self.confidence not in ("high", "medium", "low"):
             raise ValueError(
                 f"assumption {self.id!r}: confidence {self.confidence!r} is not one of ('high', 'medium', 'low')"
@@ -62,6 +64,8 @@ class Assumption:
                 f"assumption {self.id!r}: status {self.status!r} is not one of"
                 " ('simulator-only', 'hardware-verified', 'hardware-contradicted')"
             )
+        if self.status in ("hardware-verified", "hardware-contradicted") and not self.note.strip():
+            raise ValueError(f"assumption {self.id!r}: status {self.status!r} requires a non-empty note")
 
 
 def by_id(assumptions: Iterable[Assumption]) -> dict[str, Assumption]:

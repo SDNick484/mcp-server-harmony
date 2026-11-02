@@ -16,7 +16,14 @@ import logging
 
 import pytest
 
-from harmony_mcp.tasks import _BACKGROUND_TASKS, spawn_task, stop_task, stop_tasks
+from harmony_mcp.tasks import (
+    _BACKGROUND_TASKS,
+    _consume_abandoned_exception,
+    spawn_task,
+    stop_background_tasks,
+    stop_task,
+    stop_tasks,
+)
 
 pytestmark = pytest.mark.anyio
 
@@ -302,3 +309,38 @@ async def test_spawn_task_keeps_an_unreferenced_task_alive_and_cleans_up():
     await asyncio.wait_for(finished.wait(), timeout=1)
     await asyncio.sleep(0)  # let the done callback discard the task
     assert not any(t.get_name() == "orphan" for t in _BACKGROUND_TASKS)
+
+
+async def test_consume_abandoned_exception():
+    async def fails_later():
+        await asyncio.sleep(0.01)
+        raise RuntimeError("late crash")
+
+    task = asyncio.create_task(fails_later())
+    _consume_abandoned_exception(task)
+    await asyncio.sleep(0.05)
+    _consume_abandoned_exception(task)
+
+    cancelled_task = asyncio.create_task(asyncio.sleep(10))
+    cancelled_task.cancel()
+    await asyncio.sleep(0.01)
+    _consume_abandoned_exception(cancelled_task)
+
+
+async def test_stop_background_tasks():
+    ran = False
+
+    async def worker():
+        nonlocal ran
+        try:
+            await asyncio.sleep(10)
+        finally:
+            ran = True
+
+    t1 = spawn_task(worker(), name="bg1")
+    t2 = spawn_task(worker(), name="bg2")
+    await asyncio.sleep(0)
+    assert t1 in _BACKGROUND_TASKS and t2 in _BACKGROUND_TASKS
+    await stop_background_tasks(timeout=1.0)
+    assert t1.cancelled() and t2.cancelled()
+    assert ran is True

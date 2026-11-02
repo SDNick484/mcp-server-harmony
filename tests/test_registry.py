@@ -96,7 +96,30 @@ def test_every_confidence_is_accepted(confidence):
 
 @pytest.mark.parametrize("status", ["simulator-only", "hardware-verified", "hardware-contradicted"])
 def test_every_status_is_accepted(status):
-    assert Assumption("X-NEW", "claim", "docs", "high", status=status).status == status
+    note = "seen on hardware" if status != "simulator-only" else ""
+    assert Assumption("X-NEW", "claim", "docs", "high", status=status, note=note).status == status
+
+
+@pytest.mark.parametrize(
+    "field,args",
+    [
+        ("id", ("", "claim", "docs")),
+        ("id", ("   ", "claim", "docs")),
+        ("claim", ("X-NEW", "", "docs")),
+        ("source", ("X-NEW", "claim", "")),
+    ],
+)
+def test_empty_id_claim_or_source_is_refused(field, args):
+    with pytest.raises(ValueError, match="id, claim and source must be non-empty"):
+        Assumption(*args, "high")
+
+
+@pytest.mark.parametrize("status", ["hardware-verified", "hardware-contradicted"])
+def test_hardware_status_without_note_is_refused(status):
+    with pytest.raises(ValueError, match="requires a non-empty note"):
+        Assumption("X-NEW", "claim", "docs", "high", status=status, note="")
+    with pytest.raises(ValueError, match="requires a non-empty note"):
+        Assumption("X-NEW", "claim", "docs", "high", status=status, note="   ")
 
 
 @pytest.mark.parametrize("confidence", ["High", "certain", ""])

@@ -49,8 +49,8 @@ async def test_dry_run_through_mcp(settings, factory, monkeypatch, fake):
     monkeypatch.setenv("HARMONY_DRY_RUN", "1")
     c = await connect(monkeypatch, factory)
     try:
-        assert (await c.call_tool("get_status", {})).structured_content["dry_run"] is True
-        r = (await c.call_tool("start_activity", {"activity": "Watch Shield"})).structured_content
+        assert (await c.call_tool("harmony_get_status", {})).structured_content["dry_run"] is True
+        r = (await c.call_tool("harmony_start_activity", {"activity": "Watch Shield"})).structured_content
         assert r["outcome"] == "dry_run" and r["detail"].startswith("DRY RUN, nothing sent")
         assert fake.started == []
     finally:
@@ -112,15 +112,15 @@ async def two(two_hubs, factory, monkeypatch):
 
 
 async def test_refs_from_list_tools_work_as_names(two, fakes):
-    rows = (await two.call_tool("list_activities", {})).structured_content["result"]
+    rows = (await two.call_tool("harmony_list_activities", {})).structured_content["result"]
     den_music = next(r["ref"] for r in rows if r["hub"] == "Den" and r["name"] == "Listen to Music")
     assert den_music == "Den/Listen to Music"
-    assert not (await two.call_tool("start_activity", {"activity": den_music})).is_error
+    assert not (await two.call_tool("harmony_start_activity", {"activity": den_music})).is_error
     assert fakes["192.0.2.21"].started == [39000002]
 
 
 async def test_ref_and_conflicting_hub_argument_is_refused(two):
-    result = await two.call_tool("start_activity", {"activity": "Den/Listen to Music", "hub": "Living Room"})
+    result = await two.call_tool("harmony_start_activity", {"activity": "Den/Listen to Music", "hub": "Living Room"})
     assert result.is_error and "names hub Den, but hub='Living Room' was also given" in text(result)
 
 
@@ -129,12 +129,12 @@ async def test_a_name_containing_a_slash_that_reads_as_a_ref_is_ambiguous(two, f
     living.callbacks.config_updated(
         {"activity": [{"id": "1", "label": "Den/Listen to Music", "controlGroup": []}], "device": []}
     )
-    result = await two.call_tool("start_activity", {"activity": "Den/Listen to Music"})
+    result = await two.call_tool("harmony_start_activity", {"activity": "Den/Listen to Music"})
     assert result.is_error and "pass the name and hub separately" in text(result)
 
 
 async def test_device_refs(two, fakes):
-    result = await two.call_tool("send_command", {"command": "VolumeUp", "device": "Den/Den TV"})
+    result = await two.call_tool("harmony_send_command", {"command": "VolumeUp", "device": "Den/Den TV"})
     assert not result.is_error and fakes["192.0.2.21"].presses() == [(72000001, "VolumeUp")]
 
 
@@ -157,7 +157,7 @@ async def test_fix_stuck_remote_prompt(two):
     assert "fix_stuck_remote" in prompts
     got = await two.get_prompt("fix_stuck_remote", {"hub": "Den"})
     body = got.messages[0].content.text
-    assert "the hub 'Den'" in body and "power_off" in body and "start_activity" in body
+    assert "the hub 'Den'" in body and "harmony_power_off" in body and "harmony_start_activity" in body
 
 
 # --- config validation ------------------------------------------------------------------------------
@@ -215,6 +215,6 @@ async def test_a_wedged_hub_cannot_hang_shutdown(settings, factory, monkeypatch)
 async def test_power_off_with_nothing_on_returns_no_results(settings, factory, monkeypatch):
     c = await connect(monkeypatch, factory)
     try:
-        assert outcomes(await c.call_tool("power_off", {"hub": "all"})) == []
+        assert outcomes(await c.call_tool("harmony_power_off", {"hub": "all"})) == []
     finally:
         await c.__aexit__(None, None, None)

@@ -52,3 +52,34 @@ async def test_check_with_nothing_configured(tmp_path, monkeypatch, capsys):
     monkeypatch.delenv("HARMONY_HOST", raising=False)
     assert await cli._cmd_check(None) == 2
     assert "once per hub" in capsys.readouterr().err
+
+
+async def test_call_tools_lists_namespaced_tools(capsys):
+    import argparse
+
+    ret = await cli._cmd_call(argparse.Namespace(tool="tools", args=[]))
+    assert ret == 0
+    out = capsys.readouterr().out
+    assert "harmony_get_status" in out
+    assert "harmony_start_activity" in out
+
+
+async def test_call_shorthand_and_full_name(two_hubs, factory, monkeypatch, capsys):
+    import argparse
+    from harmony_mcp import server
+    from harmony_mcp.hubs import HubRegistry
+
+    monkeypatch.setattr(server, "HubRegistry", lambda s: HubRegistry(s, api_factory=factory))
+    # Unprefixed shorthand
+    ret = await cli._cmd_call(argparse.Namespace(tool="get_status", args=[]))
+    assert ret == 0
+    out = capsys.readouterr().out
+    assert "Living Room" in out
+    assert "x.x.x.20" in out
+
+    # Full prefixed name
+    ret = await cli._cmd_call(argparse.Namespace(tool="harmony_get_status", args=[]))
+    assert ret == 0
+    out = capsys.readouterr().out
+    assert "Living Room" in out
+    assert "x.x.x.20" in out

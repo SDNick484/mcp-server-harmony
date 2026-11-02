@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- **Tool Namespacing:** All MCP tools are now prefixed with `harmony_` (`harmony_get_status`, `harmony_list_activities`, `harmony_list_devices`, `harmony_list_commands`, `harmony_start_activity`, `harmony_power_off`, `harmony_send_command`) to avoid naming collisions in MCP clients when run alongside sibling smart home servers.
+- **CLI Shorthand:** The `call` CLI subcommand accepts both prefixed (`harmony_get_status`) and legacy/shorthand names (`get_status`, `status`).
+
+### Security
+
+- **Network Topology Masking:** Internal hub LAN IPv4 addresses in `harmony_get_status` payloads are sanitized with `mask_ip` (e.g. `192.0.2.20` -> `x.x.x.20`) to prevent leaking local network topology to LLMs over stdout.
+
 ### Added
 
 - `power_off(force=true)`: sends the power off even while a hub is mid-sequence (a start stuck warming

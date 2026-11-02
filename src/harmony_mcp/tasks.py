@@ -22,6 +22,11 @@ T = TypeVar("T")
 _BACKGROUND_TASKS: set[asyncio.Task[Any]] = set()
 
 
+def _consume_abandoned_exception(task: asyncio.Task[Any]) -> None:
+    if task.done() and not task.cancelled():
+        task.exception()
+
+
 async def stop_task(task: asyncio.Task[Any] | None, timeout: float, what: str) -> None:
     """Cancel a background task and wait until it has finished, re-cancelling as needed, for at most `timeout`.
 
@@ -81,6 +86,8 @@ async def stop_tasks(tasks: Iterable[asyncio.Task[Any] | None], timeout: float, 
                     len(given),
                     names,
                 )
+            for task in pending:
+                task.add_done_callback(_consume_abandoned_exception)
             return
         for task in pending:
             task.cancel()
@@ -129,3 +136,8 @@ def spawn_task(
 
     task.add_done_callback(done)
     return task
+
+
+async def stop_background_tasks(timeout: float = 5.0, what: str = "background tasks") -> None:
+    """Cancel and wait for all currently running tasks started by ``spawn_task``."""
+    await stop_tasks(tuple(_BACKGROUND_TASKS), timeout, what)

@@ -207,9 +207,16 @@ async def _cmd_call(args: argparse.Namespace) -> int:
     async with Client(mcp) as c:
         if args.tool == "tools":
             for t in (await c.list_tools()).tools:
-                print(f"{t.name:<16} {(t.description or '').splitlines()[0]}")
+                print(f"{t.name:<24} {(t.description or '').splitlines()[0]}")
             return 0
-        result = await c.call_tool(args.tool, tool_args)
+        tool_name = args.tool
+        available_tools = {t.name for t in (await c.list_tools()).tools}
+        if tool_name not in available_tools:
+            if f"harmony_{tool_name}" in available_tools:
+                tool_name = f"harmony_{tool_name}"
+            elif tool_name == "status" and "harmony_get_status" in available_tools:
+                tool_name = "harmony_get_status"
+        result = await c.call_tool(tool_name, tool_args)
     if result.is_error:
         print(" ".join(getattr(part, "text", "") for part in result.content) or "error", file=sys.stderr)
         return 1
