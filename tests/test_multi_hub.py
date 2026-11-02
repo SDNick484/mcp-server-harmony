@@ -29,7 +29,8 @@ async def test_status_lists_both_hubs_by_name(mcp_client):
 
 
 async def test_unique_names_need_no_hub(mcp_client, fakes):
-    assert detail(await mcp_client.call_tool("harmony_start_activity", {"activity": "Watch TV"})) == "Start Watch TV on Den"
+    res = await mcp_client.call_tool("harmony_start_activity", {"activity": "Watch TV"})
+    assert detail(res) == "Start Watch TV on Den"
     assert fakes[DEN].started == [DEN_WATCH] and fakes[LIVING].started == []
 
 

@@ -14,7 +14,7 @@ from mcp import Client
 from harmony_mcp import cli, remote, server
 from harmony_mcp.hubs import HubRegistry
 
-from .conftest import LIVING, ONKYO, SHIELD, WATCH_SHIELD, wait_until
+from .conftest import ONKYO, SHIELD, WATCH_SHIELD, wait_until
 
 pytestmark = pytest.mark.anyio
 

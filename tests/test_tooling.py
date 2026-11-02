@@ -6,7 +6,6 @@ import argparse
 import asyncio
 import json
 import logging
-import socket
 
 import aioharmony.hubconnector_websocket as ws_connector
 import pytest

@@ -310,7 +310,8 @@ def test_mask_host_port():
 
 def test_mask_url():
     assert mask_url("http://192.168.1.50:8480/") == "http://x.x.x.50:8480/"
-    assert mask_url("http://192.168.1.50:8480/api/v1?device=tv#section") == "http://x.x.x.50:8480/api/v1?device=tv#section"
+    url_with_query = "http://192.168.1.50:8480/api/v1?device=tv#section"
+    assert mask_url(url_with_query) == "http://x.x.x.50:8480/api/v1?device=tv#section"
     assert mask_url("http://user:pass@192.168.1.50:8480/") == "http://user:pass@x.x.x.50:8480/"
     assert mask_url("http://[2001:db8::1]:8480/") == "http://[x:x::1]:8480/"
     assert mask_url("http://localhost:8480/") == "http://localhost:8480/"

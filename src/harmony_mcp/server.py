@@ -99,7 +99,9 @@ _ACT_IDEMPOTENT = ACT_IDEMPOTENT
 
 Hub = Annotated[
     str | None,
-    Field(description="Hub name from harmony_get_status. Omit to look across all hubs (needed only if a name repeats)."),
+    Field(
+        description="Hub name from harmony_get_status. Omit to look across all hubs (needed only if a name repeats)."
+    ),
 ]
 
 
@@ -225,7 +227,9 @@ async def harmony_list_commands(target: Target = None, hub: Hub = None) -> Comma
 # --- writes -----------------------------------------------------------------------------
 @mcp.tool(title="Start an activity", annotations=_ACT_IDEMPOTENT)
 async def harmony_start_activity(
-    activity: Annotated[str, Field(description="Activity name or ref from harmony_list_activities, e.g. 'Den/Watch TV'.")],
+    activity: Annotated[
+        str, Field(description="Activity name or ref from harmony_list_activities, e.g. 'Den/Watch TV'.")
+    ],
     hub: Hub = None,
 ) -> ActionResult:
     """Start an activity: its hub powers on the devices and sets their inputs, then this returns (a few seconds).

@@ -66,6 +66,7 @@ async def test_call_tools_lists_namespaced_tools(capsys):
 
 async def test_call_shorthand_and_full_name(two_hubs, factory, monkeypatch, capsys):
     import argparse
+
     from harmony_mcp import server
     from harmony_mcp.hubs import HubRegistry
 
