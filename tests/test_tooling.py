@@ -163,10 +163,10 @@ async def test_simulate_writes_a_config_the_server_can_use(tmp_path, monkeypatch
     """`simulate --write-config DIR`, then the real server (MCP client, real aioharmony) against it."""
     try:
         loop = asyncio.get_running_loop()
-        s1 = await loop.create_server(asyncio.Protocol, "127.0.0.1", 0, reuse_address=True, reuse_port=True)
+        s1 = await loop.create_server(asyncio.Protocol, "127.0.0.1", 0, reuse_address=True)
         p = s1.sockets[0].getsockname()[1]
         try:
-            s2 = await loop.create_server(asyncio.Protocol, "127.0.0.2", p, reuse_address=True, reuse_port=True)
+            s2 = await loop.create_server(asyncio.Protocol, "127.0.0.2", p, reuse_address=True)
             s2.close()
         finally:
             s1.close()

@@ -254,10 +254,10 @@ async def two_fake_hubs(monkeypatch, tmp_path):
     """Two wire-level fakes on 127.0.0.1 and 127.0.0.2 (same port, as aioharmony needs)."""
     try:
         loop = asyncio.get_running_loop()
-        s1 = await loop.create_server(asyncio.Protocol, "127.0.0.1", 0, reuse_address=True, reuse_port=True)
+        s1 = await loop.create_server(asyncio.Protocol, "127.0.0.1", 0, reuse_address=True)
         p = s1.sockets[0].getsockname()[1]
         try:
-            s2 = await loop.create_server(asyncio.Protocol, "127.0.0.2", p, reuse_address=True, reuse_port=True)
+            s2 = await loop.create_server(asyncio.Protocol, "127.0.0.2", p, reuse_address=True)
             s2.close()
         finally:
             s1.close()
