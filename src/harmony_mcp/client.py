@@ -44,6 +44,7 @@ from .limits import (
     PRESS_CAPACITY,
     PRESS_RATE,
 )
+from .logsafe import mask_ip
 from .ratelimit import TokenBucket, refusal
 from .tasks import stop_task
 
@@ -499,7 +500,7 @@ class HubClient:
             power = "off" if self.activity_id == POWER_OFF_ID else "on"
         return {
             "hub": self.name,
-            "host": self.host,
+            "host": mask_ip(self.host),
             "reachable": self.available,
             "firmware": api.fw_version if api is not None else None,
             "power": power,

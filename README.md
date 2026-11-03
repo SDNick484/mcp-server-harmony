@@ -166,17 +166,17 @@ startup and by `doctor`.
 
 ## Tools
 
-| Tool              | What it does                                                                                     |
-| ----------------- | ------------------------------------------------------------------------------------------------ |
-| `get_status`      | Start here: every hub's name, reachable, firmware, on/off, running activity, and any `transition` |
-| `list_activities` | Activities on each hub, with `ref`, marking the running ones                                    |
-| `list_devices`    | Devices on each hub, with `ref`, manufacturer, model and command count                          |
-| `list_commands`   | Commands for an activity or device (default: the running activity), and which device gets each  |
-| `start_activity`  | Start an activity and wait until its hub finishes; `unchanged` if it's already running          |
-| `power_off`       | Run a hub's power-off (or `hub="all"`); `unchanged` if it's already off; `force` sends it anyway |
-| `send_command`    | Press a command 1-10 times (`repeat`), optionally held (`hold_ms`) or spaced (`delay_ms`)      |
+| Tool                      | What it does                                                                                     |
+| ------------------------- | ------------------------------------------------------------------------------------------------ |
+| `harmony_get_status`      | Start here: every hub's name, reachable, firmware, on/off, running activity, and any `transition` |
+| `harmony_list_activities` | Activities on each hub, with `ref`, marking the running ones                                    |
+| `harmony_list_devices`    | Devices on each hub, with `ref`, manufacturer, model and command count                          |
+| `harmony_list_commands`   | Commands for an activity or device (default: the running activity), and which device gets each  |
+| `harmony_start_activity`  | Start an activity and wait until its hub finishes; `unchanged` if it's already running          |
+| `harmony_power_off`       | Run a hub's power-off (or `hub="all"`); `unchanged` if it's already off; `force` sends it anyway |
+| `harmony_send_command`    | Press a command 1-10 times (`repeat`), optionally held (`hold_ms`) or spaced (`delay_ms`)      |
 
-Every tool except `get_status` takes an optional `hub`. Actions return
+Every tool except `harmony_get_status` takes an optional `hub`. Actions return
 `{hub, outcome: done | unchanged | dry_run | error, detail, sent}`, where `sent` lists the frames
 that went to the hub. The server also offers resources (`harmony://hubs`,
 `harmony://hubs/{hub}`) with each hub's catalog, and a `fix_stuck_remote` prompt for the
@@ -187,29 +187,29 @@ Shield's Bluetooth keyboard getting stuck.
 Two hubs that both have "Listen to Music". (Output from `simulate`, trimmed.)
 
 ```
-> get_status
+> harmony_get_status
   {"dry_run": false, "hubs": [
     {"hub": "Living Room", "reachable": true, "power": "off", "current_activity": null, "transition": null, ...},
     {"hub": "Den", "reachable": true, "power": "off", "current_activity": null, "transition": null, ...}]}
 
-> start_activity {"activity": "Listen to Music"}
+> harmony_start_activity {"activity": "Listen to Music"}
   ERROR: Activity 'Listen to Music' exists on Living Room, Den; pass hub to choose.
 
-> list_activities {"hub": "Den"}
+> harmony_list_activities {"hub": "Den"}
   [{"hub": "Den", "name": "Watch TV", "ref": "Den/Watch TV", "running": false},
    {"hub": "Den", "name": "Listen to Music", "ref": "Den/Listen to Music", "running": false}]
 
-> start_activity {"activity": "Den/Listen to Music"}
+> harmony_start_activity {"activity": "Den/Listen to Music"}
   {"hub": "Den", "outcome": "done", "detail": "Start Listen to Music on Den",
    "sent": ["runactivity activityId=39000002 (Listen to Music)"]}
 
-> start_activity {"activity": "Watch Shield"}
+> harmony_start_activity {"activity": "Watch Shield"}
   {"hub": "Living Room", "outcome": "done", "detail": "Start Watch Shield on Living Room", ...}
 
-> send_command {"command": "VolumeUp", "repeat": 3}
+> harmony_send_command {"command": "VolumeUp", "repeat": 3}
   ERROR: Activities are running on Living Room (Watch Shield), Den (Listen to Music); pass hub to choose.
 
-> send_command {"command": "VolumeUp", "hub": "Living Room", "repeat": 3}
+> harmony_send_command {"command": "VolumeUp", "hub": "Living Room", "repeat": 3}
   {"hub": "Living Room", "outcome": "done", "detail": "Send VolumeUp x3 to Onkyo AV Receiver on Living Room",
    "sent": ["holdAction press+release Onkyo AV Receiver/VolumeUp", ...]}
 
@@ -258,7 +258,7 @@ Two hubs that both have "Listen to Music". (Output from `simulate`, trimmed.)
 | `No Harmony hub configured.`                              | Run `check --host <ip>` once per hub, or set `HARMONY_HOSTS` (in the client's config)         |
 | `Can't reach the Harmony hub 'Den' at ...`                | Offline, its IP changed, or TCP 8088 is blocked (a VLAN in between). Other hubs keep working |
 | `... exists on Living Room, Den; pass hub to choose.`     | The name is on more than one hub: the model should ask which TV, or use a ref                |
-| `Den is busy starting ...`                                | An activity is mid-sequence. Wait until `get_status` shows `transition: null`; if it never clears, `power_off(force=true)` |
+| `Den is busy starting ...`                                | An activity is mid-sequence. Wait until `harmony_get_status` shows `transition: null`; if it never clears, `harmony_power_off(force=true)` |
 | `Rate limit: refusing to ...`                             | Many presses in a short time. Wait and retry if it was deliberate                            |
 
 `doctor` says which layer failed for each hub and what to check.

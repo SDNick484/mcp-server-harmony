@@ -71,7 +71,10 @@ def test_slow_rates_work():
     assert b.take() == 0.0
 
 
-@pytest.mark.parametrize(("capacity", "rate"), [(0, 1.0), (1, 0), (-1, 1.0)])
+@pytest.mark.parametrize(
+    ("capacity", "rate"),
+    [(0, 1.0), (1, 0), (-1, 1.0), (float("nan"), 1.0), (float("inf"), 1.0), (1.0, float("nan")), (1.0, float("inf"))],
+)
 def test_nonsense_settings_are_rejected(capacity, rate):
     with pytest.raises(ValueError):
         TokenBucket(capacity, rate)
@@ -81,8 +84,10 @@ def test_refusal_message():
     msg = refusal("launch Contra", 11.6, device="Den")
     assert msg.startswith("Rate limit on Den: refusing to launch Contra (try again in 12s).")
     assert "runaway loops" in msg
-    assert refusal("press VolumeUp x30", float("inf")).startswith(
-        "Rate limit: refusing to press VolumeUp x30 (it's more than the limit allows at once)."
+    assert (
+        refusal("press VolumeUp x30", float("inf"))
+        == "Rate limit: refusing to press VolumeUp x30 (it's more than the limit allows at once). "
+        "This guards against runaway loops; reduce the count or split the request instead of retrying as-is."
     )
     assert "try again in 1s" in refusal("x", 0.2)  # never "0s"
 
@@ -92,6 +97,8 @@ def test_taking_a_negative_amount_is_rejected():
     b.take()
     with pytest.raises(ValueError):
         b.take(-5)  # would have added 5 tokens, past capacity
+    with pytest.raises(ValueError):
+        b.take(float("nan"))
     assert b.tokens == 2
 
 
@@ -128,6 +135,10 @@ def test_refunding_a_negative_amount_is_rejected():
     b, _ = bucket(3, 1.0)
     with pytest.raises(ValueError):
         b.refund(-1)
+    with pytest.raises(ValueError):
+        b.refund(float("nan"))
+    with pytest.raises(ValueError):
+        b.refund(float("inf"))
     assert b.tokens == 3
 
 
@@ -236,6 +247,8 @@ async def test_acquire_a_negative_amount_is_rejected():
     b, _, _ = async_bucket(3, 1.0)
     with pytest.raises(ValueError):
         await b.acquire(-1)
+    with pytest.raises(ValueError):
+        await b.acquire(float("nan"))
     assert b.tokens == 3
 
 
@@ -338,7 +351,32 @@ async def test_keyed_acquire():
         await k.acquire("den", 2)
 
 
-@pytest.mark.parametrize(("capacity", "rate"), [(0, 1.0), (1, 0), (-1, 1.0)])
+@pytest.mark.anyio
+async def test_keyed_reserve():
+    now = [0.0]
+    sleeps: list[float] = []
+
+    async def sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+        now[0] += seconds
+
+    k = KeyedTokenBucket(2, 1.0, lambda: now[0], sleep)
+    k.take("den", 2)
+    async with k.reserve("den", 1, refund_on_error=True) as waited:
+        assert waited == pytest.approx(1.0)
+    assert k.take("den") == pytest.approx(1.0)  # spent
+
+    with pytest.raises(ConnectionRefusedError):
+        async with k.reserve("den", 1, refund_on_error=True):
+            raise ConnectionRefusedError
+    # refunded
+    assert k.get("den").tokens == pytest.approx(1.0)
+
+
+@pytest.mark.parametrize(
+    ("capacity", "rate"),
+    [(0, 1.0), (1, 0), (-1, 1.0), (float("nan"), 1.0), (float("inf"), 1.0), (1.0, float("nan")), (1.0, float("inf"))],
+)
 def test_keyed_nonsense_settings_are_rejected_up_front(capacity, rate):
     with pytest.raises(ValueError):
         KeyedTokenBucket(capacity, rate)

@@ -60,7 +60,7 @@ def test_code_cites_only_real_ids_and_every_id_is_used():
 SAMPLE = (
     Assumption("H-X", "claim", "source", "low"),
     Assumption("H-Y", "claim", "source", "high", status="hardware-contradicted", note="saw otherwise"),
-    Assumption("H-Z", "claim", "source", "high", status="hardware-verified"),
+    Assumption("H-Z", "claim", "source", "high", status="hardware-verified", note="verified in lab"),
 )
 
 

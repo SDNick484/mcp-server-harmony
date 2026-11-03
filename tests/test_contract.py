@@ -253,10 +253,16 @@ async def test_config_pushed_from_the_app_reloads_the_catalog(client, fake_hub):
 async def two_fake_hubs(monkeypatch, tmp_path):
     """Two wire-level fakes on 127.0.0.1 and 127.0.0.2 (same port, as aioharmony needs)."""
     try:
-        with socket.socket() as s:
-            s.bind(("127.0.0.2", 0))
+        loop = asyncio.get_running_loop()
+        s1 = await loop.create_server(asyncio.Protocol, "127.0.0.1", 0, reuse_address=True)
+        p = s1.sockets[0].getsockname()[1]
+        try:
+            s2 = await loop.create_server(asyncio.Protocol, "127.0.0.2", p, reuse_address=True)
+            s2.close()
+        finally:
+            s1.close()
     except OSError:
-        pytest.skip("no 127.0.0.2 loopback (macOS: sudo ifconfig lo0 alias 127.0.0.2)")
+        pytest.skip("no 127.0.0.2 loopback (macOS: sudo ifconfig lo0 alias 127.0.0.2; or WSL2 port sharing)")
     port = free_port_on("127.0.0.1", "127.0.0.2")
     living = FakeHub(load_fixture("living_room"), name="Living Room", host="127.0.0.1", port=port)
     den = FakeHub(load_fixture("den"), name="Den", host="127.0.0.2", port=port, remote_id=87654321)
@@ -283,21 +289,21 @@ async def test_two_hubs_end_to_end_through_mcp(two_fake_hubs):
     living, den = two_fake_hubs
     async with Client(server.mcp) as c:
         await eventually(lambda: all(h.available for h in server.hubs().hubs))
-        hubs = (await c.call_tool("get_status", {})).structured_content["hubs"]
+        hubs = (await c.call_tool("harmony_get_status", {})).structured_content["hubs"]
         assert [h["hub"] for h in hubs] == ["Living Room", "Den"]  # friendlyName over the wire
 
-        result = await c.call_tool("start_activity", {"activity": "Listen to Music"})
+        result = await c.call_tool("harmony_start_activity", {"activity": "Listen to Music"})
         assert result.is_error and "exists on Living Room, Den" in result.content[0].text
         assert living.started == den.started == []
 
-        assert not (await c.call_tool("start_activity", {"activity": "Listen to Music", "hub": "Den"})).is_error
+        assert not (await c.call_tool("harmony_start_activity", {"activity": "Listen to Music", "hub": "Den"})).is_error
         assert den.current_activity == 39000002 and living.current_activity == -1
 
-        await c.call_tool("send_command", {"command": "volume up"})  # only the Den is on
+        await c.call_tool("harmony_send_command", {"command": "volume up"})  # only the Den is on
         await eventually(lambda: [p.command for p in den.presses] == ["VolumeUp", "VolumeUp"])
         assert living.presses == []
 
-        await c.call_tool("start_activity", {"activity": "Watch Shield"})
-        assert (await c.call_tool("power_off", {})).is_error  # both on: ask, don't guess
-        assert not (await c.call_tool("power_off", {"hub": "all"})).is_error
+        await c.call_tool("harmony_start_activity", {"activity": "Watch Shield"})
+        assert (await c.call_tool("harmony_power_off", {})).is_error  # both on: ask, don't guess
+        assert not (await c.call_tool("harmony_power_off", {"hub": "all"})).is_error
         assert living.current_activity == den.current_activity == -1

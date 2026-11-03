@@ -21,6 +21,7 @@ code that paces itself, such as a macro stepping through presses.
 
 from __future__ import annotations
 
+import math
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
@@ -58,7 +59,7 @@ class TokenBucket:
     _last: float = field(init=False)
 
     def __post_init__(self) -> None:
-        if self.capacity <= 0 or self.rate <= 0:
+        if not (math.isfinite(self.capacity) and math.isfinite(self.rate)) or self.capacity <= 0 or self.rate <= 0:
             raise ValueError("capacity and rate must be positive")
         self.tokens = self.capacity
         self._last = self.clock()
@@ -74,7 +75,7 @@ class TokenBucket:
         More than ``capacity`` can never be available, so that returns infinity.
         A negative n raises ``ValueError``: it would add tokens, past capacity.
         """
-        if n < 0:
+        if math.isnan(n) or n < 0:
             raise ValueError("cannot take a negative number of tokens")
         self._refill()
         if n > self.capacity:
@@ -91,7 +92,7 @@ class TokenBucket:
         shouldn't count against the device's budget. One that may have reached
         it (a timeout waiting for the reply) should, so don't refund that.
         """
-        if n < 0:
+        if not math.isfinite(n) or n < 0:
             raise ValueError("can't refund a negative number of tokens")
         self._refill()
         self.tokens = min(self.capacity, self.tokens + n)
@@ -110,10 +111,10 @@ class TokenBucket:
         wakes first when tokens arrive gets them, and the others go back to
         sleep. Cancelling a waiting ``acquire`` takes nothing.
         """
+        if math.isnan(n) or n < 0:
+            raise ValueError("cannot acquire a negative number of tokens")
         if n > self.capacity:
             raise ValueError("cannot acquire more tokens than capacity")
-        if n < 0:
-            raise ValueError("cannot acquire a negative number of tokens")
         self._refill()
         start = self._last  # the clock as of each refill, so no sleep means exactly 0.0
         while True:
@@ -168,7 +169,7 @@ class KeyedTokenBucket:
         clock: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], Awaitable[None]] = anyio.sleep,
     ) -> None:
-        if capacity <= 0 or rate <= 0:  # here too, so bad settings fail at startup, not on first use
+        if not (math.isfinite(capacity) and math.isfinite(rate)) or capacity <= 0 or rate <= 0:
             raise ValueError("capacity and rate must be positive")
         self.capacity = capacity
         self.rate = rate
@@ -195,6 +196,14 @@ class KeyedTokenBucket:
         """``TokenBucket.acquire`` on ``key``'s bucket."""
         return await self.get(key).acquire(n, timeout)
 
+    @asynccontextmanager
+    async def reserve(
+        self, key: str, n: float = 1.0, timeout: float | None = None, refund_on_error: bool = False
+    ) -> AsyncIterator[float]:
+        """``TokenBucket.reserve`` on ``key``'s bucket."""
+        async with self.get(key).reserve(n, timeout=timeout, refund_on_error=refund_on_error) as waited:
+            yield waited
+
 
 def refusal(what: str, wait: float, device: str | None = None) -> str:
     """The error message for a refused action.
@@ -205,9 +214,13 @@ def refusal(what: str, wait: float, device: str | None = None) -> str:
     ``wait`` is what ``TokenBucket.take`` returned. The message says why the
     limit exists, so the model doesn't treat it as a fault to work around.
     """
-    when = "it's more than the limit allows at once" if wait == float("inf") else f"try again in {max(wait, 1):.0f}s"
     on = f" on {device}" if device else ""
+    if wait == float("inf"):
+        return (
+            f"Rate limit{on}: refusing to {what} (it's more than the limit allows at once). "
+            "This guards against runaway loops; reduce the count or split the request instead of retrying as-is."
+        )
     return (
-        f"Rate limit{on}: refusing to {what} ({when}). This guards against runaway loops; "
-        "if this is deliberate, wait and retry."
+        f"Rate limit{on}: refusing to {what} (try again in {max(wait, 1):.0f}s). "
+        "This guards against runaway loops; if this is deliberate, wait and retry."
     )

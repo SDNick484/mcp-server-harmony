@@ -38,7 +38,6 @@ from typing import Annotated, Literal
 from urllib.parse import unquote
 
 from mcp.server import MCPServer
-from mcp.types import ToolAnnotations
 from pydantic import Field
 from typing_extensions import TypedDict
 
@@ -47,6 +46,8 @@ from .client import HarmonyError, HubClient, Outcome, Status
 from .config import load_settings
 from .hubs import ALL, HubRegistry, ref
 from .limits import MAX_DELAY_MS, MAX_HOLD_MS, MAX_REPEAT, MIN_DELAY_MS
+from .lookup import unknown_with_suggestions
+from .tools import ACT, ACT_IDEMPOTENT, READ_ONLY
 
 log = logging.getLogger(__name__)
 
@@ -81,29 +82,26 @@ async def lifespan(_server: MCPServer) -> AsyncIterator[None]:
 mcp = MCPServer(
     "harmony",
     instructions=(
-        "Controls Logitech Harmony Hubs, usually one per TV. Call get_status first: it lists each hub by name, "
-        "whether it is on, and its running activity. Prefer activities: start_activity (e.g. 'Watch Shield') "
-        "powers the right devices and switches inputs; power_off turns a hub's devices off. For buttons, "
-        "send_command without a device goes through the running activity. Names can be hub-qualified "
+        "Controls Logitech Harmony Hubs, usually one per TV. Call harmony_get_status first: it lists each hub by name, "
+        "whether it is on, and its running activity. Prefer activities: harmony_start_activity (e.g. 'Watch Shield') "
+        "powers the right devices and switches inputs; harmony_power_off turns a hub's devices off. For buttons, "
+        "harmony_send_command without a device goes through the running activity. Names can be hub-qualified "
         "('Den/Watch TV', the `ref` field of list results); pass hub only when a name exists on several hubs."
     ),
     lifespan=lifespan,
 )
 
-# Annotations: explicit on every tool, since a tool without them is assumed
-# destructive, non-idempotent and open-world. open_world is False everywhere:
-# we only talk to hubs on the LAN. Nothing is destructive: activities and IR
-# commands change what's on, not data, and can be undone. Starting an activity
-# is idempotent (it's a state); pressing a button is not (VolumeUp twice is +2).
-_READ = ToolAnnotations(read_only_hint=True, open_world_hint=False)
-_ACT = ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=False)
-_ACT_IDEMPOTENT = ToolAnnotations(
-    read_only_hint=False, destructive_hint=False, idempotent_hint=True, open_world_hint=False
-)
+# Annotations from .tools: explicit on every tool, since a tool without them is
+# assumed destructive, non-idempotent and open-world.
+_READ = READ_ONLY
+_ACT = ACT
+_ACT_IDEMPOTENT = ACT_IDEMPOTENT
 
 Hub = Annotated[
     str | None,
-    Field(description="Hub name from get_status. Omit to look across all hubs (needed only if a name repeats)."),
+    Field(
+        description="Hub name from harmony_get_status. Omit to look across all hubs (needed only if a name repeats)."
+    ),
 ]
 
 
@@ -170,7 +168,7 @@ def _result(h: HubClient, o: Outcome, done: str, unchanged: str) -> ActionResult
 
 # --- reads ------------------------------------------------------------------------------
 @mcp.tool(title="Get hub status", annotations=_READ)
-async def get_status() -> HubsStatus:
+async def harmony_get_status() -> HubsStatus:
     """Start here. Lists every hub (one per TV) with whether it's reachable, on or off, and its running activity.
 
     transition is non-null while an activity is starting or powering off; that hub's commands wait until it
@@ -181,7 +179,7 @@ async def get_status() -> HubsStatus:
 
 
 @mcp.tool(title="List activities", annotations=_READ)
-async def list_activities(hub: Hub = None) -> list[ActivityInfo]:
+async def harmony_list_activities(hub: Hub = None) -> list[ActivityInfo]:
     """List the activities on each hub (e.g. 'Watch Shield'), marking the running ones. Each has a ref usable
     anywhere an activity name is."""
     return [
@@ -192,9 +190,9 @@ async def list_activities(hub: Hub = None) -> list[ActivityInfo]:
 
 
 @mcp.tool(title="List devices", annotations=_READ)
-async def list_devices(hub: Hub = None) -> list[DeviceInfo]:
+async def harmony_list_devices(hub: Hub = None) -> list[DeviceInfo]:
     """List the devices each hub controls, with how many commands each knows. Use only when an activity
-    doesn't cover what you need (send_command with device)."""
+    doesn't cover what you need (harmony_send_command with device)."""
     return [
         {
             "hub": h.name,
@@ -216,8 +214,8 @@ Target = Annotated[
 
 
 @mcp.tool(title="List commands", annotations=_READ)
-async def list_commands(target: Target = None, hub: Hub = None) -> CommandList:
-    """List the commands send_command accepts for an activity or device (default: the running activity).
+async def harmony_list_commands(target: Target = None, hub: Hub = None) -> CommandList:
+    """List the commands harmony_send_command accepts for an activity or device (default: the running activity).
 
     Each entry says which device actually receives it. Activities expose the buttons they route; devices
     expose everything they know.
@@ -228,14 +226,16 @@ async def list_commands(target: Target = None, hub: Hub = None) -> CommandList:
 
 # --- writes -----------------------------------------------------------------------------
 @mcp.tool(title="Start an activity", annotations=_ACT_IDEMPOTENT)
-async def start_activity(
-    activity: Annotated[str, Field(description="Activity name or ref from list_activities, e.g. 'Den/Watch TV'.")],
+async def harmony_start_activity(
+    activity: Annotated[
+        str, Field(description="Activity name or ref from harmony_list_activities, e.g. 'Den/Watch TV'.")
+    ],
     hub: Hub = None,
 ) -> ActionResult:
     """Start an activity: its hub powers on the devices and sets their inputs, then this returns (a few seconds).
 
     Starting the activity that is already running does nothing (outcome 'unchanged'). Switching activities on
-    the same hub needs no power_off first.
+    the same hub needs no harmony_power_off first.
     """
     h, a = (await ready_hubs()).activity(activity, hub)
     outcome = await h.start_activity(a)
@@ -243,7 +243,7 @@ async def start_activity(
 
 
 @mcp.tool(title="Turn a TV system off", annotations=_ACT_IDEMPOTENT)
-async def power_off(
+async def harmony_power_off(
     hub: Annotated[
         str | None,
         Field(description=f"Hub name, or '{ALL}' for every hub. Omit when only one hub is on."),
@@ -255,8 +255,8 @@ async def power_off(
     With no hub and several hubs on, this asks which; hub='all' turns off every one and reports each hub
     separately (one unreachable hub doesn't stop the others).
 
-    force=True is for a hub stuck mid-sequence (get_status shows a transition that never clears): it sends
-    the power off anyway. Use it only after a normal power_off was refused as busy. Without hub it acts on
+    force=True is for a hub stuck mid-sequence (harmony_get_status shows a transition that never clears): it sends
+    the power off anyway. Use it only after a normal harmony_power_off was refused as busy. Without hub it acts on
     hubs that are on or mid-sequence; to force one that reports off, name it.
     """
     targets = (await ready_hubs()).to_power_off(hub)
@@ -275,8 +275,8 @@ async def power_off(
 
 
 @mcp.tool(title="Send a command", annotations=_ACT)
-async def send_command(
-    command: Annotated[str, Field(description="Command name or label from list_commands, e.g. 'VolumeUp'.")],
+async def harmony_send_command(
+    command: Annotated[str, Field(description="Command name or label from harmony_list_commands, e.g. 'VolumeUp'.")],
     device: Annotated[
         str | None,
         Field(description="Send straight to this device (name or ref). Omit to send through the running activity."),
@@ -293,7 +293,7 @@ async def send_command(
 ) -> ActionResult:
     """Press a button, e.g. command='VolumeUp' with repeat=3, or command='Pause'.
 
-    Without device, the running activity decides which device gets it. Names come from list_commands;
+    Without device, the running activity decides which device gets it. Names come from harmony_list_commands;
     there is no way to send a raw IR code. Rapid repeated calls are rate-limited per hub.
     """
     r = await ready_hubs()
@@ -305,7 +305,14 @@ async def send_command(
         pool, where = dev.commands, f"device {dev.name}"
     cmd = Catalog.find_command(pool, command)
     if cmd is None:
-        raise HarmonyError(f"{where} on {h.name} has no command {command!r}. Use list_commands to see what it accepts.")
+        raise HarmonyError(
+            unknown_with_suggestions(
+                f"{where} on {h.name}",
+                command,
+                [c.name for c in pool],
+                fallback="Use harmony_list_commands to see what it accepts.",
+            )
+        )
     outcome = await h.send(cmd, repeat=repeat, hold_ms=hold_ms, delay_ms=delay_ms)
     target = h.catalog.device_name(cmd.device_id)
     return _result(h, outcome, f"send {cmd.name} x{repeat} to {target} on {h.name}", "")
@@ -344,9 +351,9 @@ def fix_stuck_remote(hub: str = "") -> str:
     where = f"the hub {hub!r}" if hub else "the hub that is on (ask me which if several are)"
     return (
         f"The remote isn't controlling {where}. Please:\n"
-        "1. Call get_status and note the running activity on that hub.\n"
-        "2. Call power_off for that hub, then get_status until its transition is null.\n"
-        "3. Call start_activity with the same activity and hub.\n"
+        "1. Call harmony_get_status and note the running activity on that hub.\n"
+        "2. Call harmony_power_off for that hub, then harmony_get_status until its transition is null.\n"
+        "3. Call harmony_start_activity with the same activity and hub.\n"
         "4. Tell me what you did. Background: the hub can stay Bluetooth-connected to a streamer (such as "
         "an NVIDIA Shield) without its buttons working, typically after the streamer reboots; restarting the "
         "activity re-establishes it."

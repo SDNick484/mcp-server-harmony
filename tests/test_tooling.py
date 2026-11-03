@@ -6,7 +6,6 @@ import argparse
 import asyncio
 import json
 import logging
-import socket
 
 import aioharmony.hubconnector_websocket as ws_connector
 import pytest
@@ -163,10 +162,16 @@ async def test_doctor_with_nothing_listening(config_dir):
 async def test_simulate_writes_a_config_the_server_can_use(tmp_path, monkeypatch, capsys):
     """`simulate --write-config DIR`, then the real server (MCP client, real aioharmony) against it."""
     try:
-        with socket.socket() as s:
-            s.bind(("127.0.0.2", 0))
+        loop = asyncio.get_running_loop()
+        s1 = await loop.create_server(asyncio.Protocol, "127.0.0.1", 0, reuse_address=True)
+        p = s1.sockets[0].getsockname()[1]
+        try:
+            s2 = await loop.create_server(asyncio.Protocol, "127.0.0.2", p, reuse_address=True)
+            s2.close()
+        finally:
+            s1.close()
     except OSError:
-        pytest.skip("no 127.0.0.2 loopback")
+        pytest.skip("no 127.0.0.2 loopback (macOS: sudo ifconfig lo0 alias 127.0.0.2; or WSL2 port sharing)")
     port = free_port_on("127.0.0.1", "127.0.0.2")
     args = argparse.Namespace(hubs=2, port=port, step_delay=0.0, write_config=str(tmp_path), flaky=None)
     ready = asyncio.Event()
@@ -183,9 +188,9 @@ async def test_simulate_writes_a_config_the_server_can_use(tmp_path, monkeypatch
 
         async with Client(server.mcp) as c:
             await eventually(lambda: all(h.available for h in server.hubs().hubs))
-            status = (await c.call_tool("get_status", {})).structured_content
+            status = (await c.call_tool("harmony_get_status", {})).structured_content
             assert [h["hub"] for h in status["hubs"]] == ["Living Room", "Den"]
-            r = (await c.call_tool("start_activity", {"activity": "Den/Watch TV"})).structured_content
+            r = (await c.call_tool("harmony_start_activity", {"activity": "Den/Watch TV"})).structured_content
             assert r["outcome"] == "done"
     finally:
         sim.cancel()

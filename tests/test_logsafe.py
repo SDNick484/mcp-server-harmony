@@ -16,9 +16,14 @@ from harmony_mcp import logsafe
 from harmony_mcp.logsafe import (
     RedactingFormatter,
     clear_custom_patterns,
+    clear_identifier_patterns,
+    mask_host_port,
+    mask_ip,
+    mask_url,
     redact,
     redact_secrets,
     register_custom_pattern,
+    register_identifier_pattern,
     setup_logging,
 )
 
@@ -30,6 +35,7 @@ def custom_patterns(monkeypatch):
     """An empty custom-rule list per test, put back afterwards, so rules registered (or cleared)
     here don't leak into other tests, and rules a sibling registers at import don't leak in."""
     monkeypatch.setattr(logsafe, "_CUSTOM_PATTERNS", [])
+    monkeypatch.setattr(logsafe, "_IDENTIFIER_PATTERNS", [])
 
 
 def test_addresses_and_macs():
@@ -44,6 +50,7 @@ def test_lowercase_bare_macs():
     assert redact("id 0009b0F76cFd") == "id xxxxxxxx6cFd"  # mixed case: the kept four keep theirs
     # Twelve hex digits inside a longer token (a git SHA, a UUID part) are left alone.
     assert redact("commit 16809a6f0a1b2c3d4e5f") == "commit 16809a6f0a1b2c3d4e5f"
+    assert redact("uuid c5c5c5c5-0000-4000-8000-000000000025") == "uuid c5c5c5c5-0000-4000-8000-000000000025"
 
 
 @pytest.mark.parametrize(
@@ -118,10 +125,35 @@ def test_ipv6_is_an_address_not_a_secret():
         ("/x?monkey=1&keyboard=2&passphrase_hint=3", "/x?monkey=1&keyboard=2&passphrase_hint=3"),
         ("key=value outside a URL", "key=value outside a URL"),
         ("/x?token=&next=1", "/x?token=&next=1"),  # nothing to hide
+        ("http://127.0.0.1:8000?email=user@example.com", "http://127.0.0.1:8000?email=user@example.com"),
+        ("http://127.0.0.1:8000#frag@section", "http://127.0.0.1:8000#frag@section"),
     ],
 )
 def test_url_query_secrets(line, expected):
     assert redact_secrets(line) == expected
+
+
+def test_json_secret_redaction():
+    json_text = (
+        '{"access_token": "secret-token", "refresh_token": "refresh-123", "client_secret": "cs-456", '
+        '"client-key": "ck-789", "api_key": "ak-1", "apikey": "ak-2", "password": "pw", "secret": "s", "n": 1}'
+    )
+    assert redact_secrets(json_text) == (
+        '{"access_token": "***", "refresh_token": "***", "client_secret": "***", '
+        '"client-key": "***", "api_key": "***", "apikey": "***", "password": "***", "secret": "***", "n": 1}'
+    )
+    py_dict = "{'password': 'my-password', 'apikey': 'key-abc'}"
+    assert redact_secrets(py_dict) == "{'password': '***', 'apikey': '***'}"
+
+
+def test_identifier_patterns(custom_patterns):
+    register_identifier_pattern(r"device-[0-9a-f]{4}")
+    line = "connected to device-abcd at 192.168.1.10"
+    assert redact(line) == "connected to [redacted] at x.x.x.10"
+    # Identifier patterns are skipped when address redaction is disabled
+    assert redact_secrets(line) == "connected to device-abcd at 192.168.1.10"
+    clear_identifier_patterns()
+    assert redact(line) == "connected to device-abcd at x.x.x.10"
 
 
 def test_custom_patterns(custom_patterns):
@@ -235,3 +267,55 @@ def test_tracebacks_are_redacted_too():
         record = logging.LogRecord("x", logging.ERROR, __file__, 1, "boom", (), sys.exc_info())
     out = RedactingFormatter("%(message)s").format(record)
     assert "192.168.1.147" not in out and JWT not in out and "x.x.x.147" in out
+
+
+def test_mask_ip():
+    # IPv4 LAN addresses
+    assert mask_ip("192.168.1.60") == "x.x.x.60"
+    assert mask_ip("192.0.2.20") == "x.x.x.20"
+    assert mask_ip("10.0.0.1") == "x.x.x.1"
+    assert mask_ip("172.16.0.5") == "x.x.x.5"
+
+    # IPv6 addresses
+    assert mask_ip("2001:db8::1") == "x:x::1"
+    assert mask_ip("2001:0db8:85a3:0000:0000:8a2e:0370:7334") == "x:x::7334"
+    assert mask_ip("fe80::1") == "x:x::1"
+    assert mask_ip("fe80::1%eth0") == "x:x::1%eth0"
+
+    # Loopback and unspecified preserved
+    assert mask_ip("127.0.0.1") == "127.0.0.1"
+    assert mask_ip("127.0.0.2") == "127.0.0.2"
+    assert mask_ip("0.0.0.0") == "0.0.0.0"
+    assert mask_ip("::1") == "::1"
+    assert mask_ip("::") == "::"
+
+    # Hostnames & non-IPs preserved
+    assert mask_ip("localhost") == "localhost"
+    assert mask_ip("myhub.local") == "myhub.local"
+    assert mask_ip("harmony-hub") == "harmony-hub"
+    assert mask_ip("") == ""
+    assert mask_ip("x.x.x.60") == "x.x.x.60"  # already masked
+
+
+def test_mask_host_port():
+    assert mask_host_port("192.168.1.100:1883") == "x.x.x.100:1883"
+    assert mask_host_port("192.0.2.20:5222") == "x.x.x.20:5222"
+    assert mask_host_port("127.0.0.1:8000") == "127.0.0.1:8000"
+    assert mask_host_port("localhost:1883") == "localhost:1883"
+    assert mask_host_port("[2001:db8::1]:1883") == "[x:x::1]:1883"
+    assert mask_host_port("[::1]:8000") == "[::1]:8000"
+    assert mask_host_port("192.168.1.100") == "x.x.x.100"
+    assert mask_host_port("") == ""
+
+
+def test_mask_url():
+    assert mask_url("http://192.168.1.50:8480/") == "http://x.x.x.50:8480/"
+    url_with_query = "http://192.168.1.50:8480/api/v1?device=tv#section"
+    assert mask_url(url_with_query) == "http://x.x.x.50:8480/api/v1?device=tv#section"
+    assert mask_url("http://user:pass@192.168.1.50:8480/") == "http://user:pass@x.x.x.50:8480/"
+    assert mask_url("http://[2001:db8::1]:8480/") == "http://[x:x::1]:8480/"
+    assert mask_url("http://localhost:8480/") == "http://localhost:8480/"
+    assert mask_url("http://127.0.0.1:8000/healthz") == "http://127.0.0.1:8000/healthz"
+    assert mask_url("mqtt://192.168.1.200:1883") == "mqtt://x.x.x.200:1883"
+    assert mask_url("") == ""
+    assert mask_url("not-a-url") == "not-a-url"

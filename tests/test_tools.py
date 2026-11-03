@@ -14,18 +14,18 @@ from mcp import Client
 from harmony_mcp import cli, remote, server
 from harmony_mcp.hubs import HubRegistry
 
-from .conftest import LIVING, ONKYO, SHIELD, WATCH_SHIELD, wait_until
+from .conftest import ONKYO, SHIELD, WATCH_SHIELD, wait_until
 
 pytestmark = pytest.mark.anyio
 
 TOOL_NAMES = {
-    "get_status",
-    "list_activities",
-    "list_devices",
-    "list_commands",
-    "start_activity",
-    "power_off",
-    "send_command",
+    "harmony_get_status",
+    "harmony_list_activities",
+    "harmony_list_devices",
+    "harmony_list_commands",
+    "harmony_start_activity",
+    "harmony_power_off",
+    "harmony_send_command",
 }
 
 
@@ -83,44 +83,44 @@ async def test_every_tool_has_title_description_and_annotations(mcp_client):
 
 async def test_annotations_match_behavior(mcp_client):
     t = await tools(mcp_client)
-    for name in ("get_status", "list_activities", "list_devices", "list_commands"):
+    for name in ("harmony_get_status", "harmony_list_activities", "harmony_list_devices", "harmony_list_commands"):
         assert t[name].annotations.read_only_hint is True, name
-    assert t["start_activity"].annotations.idempotent_hint is True  # an activity is a state
-    assert t["power_off"].annotations.idempotent_hint is True
-    assert t["send_command"].annotations.idempotent_hint is False  # VolumeUp twice is +2
+    assert t["harmony_start_activity"].annotations.idempotent_hint is True  # an activity is a state
+    assert t["harmony_power_off"].annotations.idempotent_hint is True
+    assert t["harmony_send_command"].annotations.idempotent_hint is False  # VolumeUp twice is +2
 
 
 async def test_every_tool_but_status_takes_an_optional_hub(mcp_client):
     for name, t in (await tools(mcp_client)).items():
         props = t.input_schema.get("properties", {})
-        if name == "get_status":
+        if name == "harmony_get_status":
             assert not props
         else:
             assert "hub" in props and "hub" not in t.input_schema.get("required", []), name
 
 
 async def test_send_command_schema(mcp_client):
-    schema = (await tools(mcp_client))["send_command"].input_schema
+    schema = (await tools(mcp_client))["harmony_send_command"].input_schema
     props = schema["properties"]
     assert schema["required"] == ["command"]
     assert (props["repeat"]["minimum"], props["repeat"]["maximum"], props["repeat"]["default"]) == (1, 10, 1)
 
 
 async def test_get_status_publishes_output_schema(mcp_client):
-    schema = (await tools(mcp_client))["get_status"].output_schema
+    schema = (await tools(mcp_client))["harmony_get_status"].output_schema
     hub = schema["$defs"]["Status"]
     assert set(hub["required"]) == {"hub", "host", "reachable", "firmware", "power", "current_activity", "transition"}
 
 
 # --- tools/call --------------------------------------------------------------
 async def test_get_status(mcp_client):
-    result = await mcp_client.call_tool("get_status", {})
+    result = await mcp_client.call_tool("harmony_get_status", {})
     assert result.structured_content == {
         "dry_run": False,
         "hubs": [
             {
                 "hub": "Living Room",
-                "host": LIVING,
+                "host": "x.x.x.20",
                 "reachable": True,
                 "firmware": "4.15.600",
                 "power": "off",
@@ -132,48 +132,48 @@ async def test_get_status(mcp_client):
 
 
 async def test_list_activities_marks_the_running_one(mcp_client):
-    await mcp_client.call_tool("start_activity", {"activity": "Watch Shield"})
-    rows = (await mcp_client.call_tool("list_activities", {})).structured_content["result"]
+    await mcp_client.call_tool("harmony_start_activity", {"activity": "Watch Shield"})
+    rows = (await mcp_client.call_tool("harmony_list_activities", {})).structured_content["result"]
     assert {r["name"]: r["running"] for r in rows} == {"Watch Shield": True, "Listen to Music": False}
     assert {r["hub"] for r in rows} == {"Living Room"}
 
 
 async def test_list_commands_defaults_to_the_running_activity(mcp_client):
-    result = await mcp_client.call_tool("list_commands", {})
+    result = await mcp_client.call_tool("harmony_list_commands", {})
     assert result.is_error and "No activity is running" in text(result)
-    await mcp_client.call_tool("start_activity", {"activity": "watch shield"})
-    listing = (await mcp_client.call_tool("list_commands", {})).structured_content
+    await mcp_client.call_tool("harmony_start_activity", {"activity": "watch shield"})
+    listing = (await mcp_client.call_tool("harmony_list_commands", {})).structured_content
     assert (listing["hub"], listing["source"]) == ("Living Room", "activity Watch Shield")
     assert {r["name"]: r["device"] for r in listing["commands"]}["VolumeUp"] == "Onkyo AV Receiver"
 
 
 async def test_start_activity_twice(mcp_client, fake):
-    result = await mcp_client.call_tool("start_activity", {"activity": "Watch Shield"})
+    result = await mcp_client.call_tool("harmony_start_activity", {"activity": "Watch Shield"})
     assert detail(result) == "Start Watch Shield on Living Room"
-    result = await mcp_client.call_tool("start_activity", {"activity": "Watch Shield"})
+    result = await mcp_client.call_tool("harmony_start_activity", {"activity": "Watch Shield"})
     assert detail(result) == "Watch Shield was already running on Living Room"
     assert fake.started == [WATCH_SHIELD]
 
 
 async def test_unknown_activity_lists_known_ones(mcp_client, fake):
-    result = await mcp_client.call_tool("start_activity", {"activity": "Watch Netflix"})
+    result = await mcp_client.call_tool("harmony_start_activity", {"activity": "Watch Netflix"})
     assert result.is_error
     assert "Unknown activity 'Watch Netflix'. Living Room: Watch Shield, Listen to Music." in text(result)
     assert fake.started == []
 
 
 async def test_power_off(mcp_client, fake):
-    assert outcomes(await mcp_client.call_tool("power_off", {})) == []
-    await mcp_client.call_tool("start_activity", {"activity": "Watch Shield"})
-    assert outcomes(await mcp_client.call_tool("power_off", {})) == [("Living Room", "done")]
+    assert outcomes(await mcp_client.call_tool("harmony_power_off", {})) == []
+    await mcp_client.call_tool("harmony_start_activity", {"activity": "Watch Shield"})
+    assert outcomes(await mcp_client.call_tool("harmony_power_off", {})) == [("Living Room", "done")]
     assert fake.started == [WATCH_SHIELD, -1]
 
 
 async def test_power_off_force_breaks_a_stuck_start(mcp_client, fake):
     fake.push_starting(WATCH_SHIELD)  # a start from the physical remote, stuck warming up
-    busy = await mcp_client.call_tool("power_off", {})
+    busy = await mcp_client.call_tool("harmony_power_off", {})
     assert busy.is_error and "busy starting Watch Shield" in text(busy)
-    assert outcomes(await mcp_client.call_tool("power_off", {"force": True})) == [("Living Room", "done")]
+    assert outcomes(await mcp_client.call_tool("harmony_power_off", {"force": True})) == [("Living Room", "done")]
     assert fake.started == [-1]
     status = server.hubs().hubs[0].snapshot()
     assert status["power"] == "off" and status["transition"] is None
@@ -183,9 +183,9 @@ async def test_power_off_force_resends_during_a_power_off(mcp_client, fake):
     # Already off, and a power-off sequence is "running": without force that's busy, and when idle it's a
     # no-op. With force the power off goes out regardless.
     fake.push_starting(-1)
-    busy = await mcp_client.call_tool("power_off", {})
+    busy = await mcp_client.call_tool("harmony_power_off", {})
     assert busy.is_error and "busy powering off" in text(busy)
-    assert outcomes(await mcp_client.call_tool("power_off", {"force": True})) == [("Living Room", "done")]
+    assert outcomes(await mcp_client.call_tool("harmony_power_off", {"force": True})) == [("Living Room", "done")]
     assert fake.started == [-1]
     assert server.hubs().hubs[0].starting_id is None
 
@@ -193,8 +193,8 @@ async def test_power_off_force_resends_during_a_power_off(mcp_client, fake):
 async def test_power_off_force_on_a_hub_that_looks_off_needs_its_name(mcp_client, fake):
     # Our state can be wrong (say the TV came on by itself). Forcing then sends the power off anyway, but
     # only to a named hub: with no hub, power_off acts on hubs that are on or mid-sequence, never a guess.
-    assert outcomes(await mcp_client.call_tool("power_off", {"force": True})) == []
-    named = await mcp_client.call_tool("power_off", {"hub": "Living Room", "force": True})
+    assert outcomes(await mcp_client.call_tool("harmony_power_off", {"force": True})) == []
+    named = await mcp_client.call_tool("harmony_power_off", {"hub": "Living Room", "force": True})
     assert outcomes(named) == [("Living Room", "done")]
     assert fake.started == [-1]
 
@@ -225,15 +225,15 @@ async def test_healthz_is_degraded_before_the_server_has_started():
 
 async def test_send_command_routes_through_the_activity(mcp_client, fake):
     # The model says "volume up"; the activity knows volume lives on the receiver.
-    await mcp_client.call_tool("start_activity", {"activity": "Watch Shield"})
-    result = await mcp_client.call_tool("send_command", {"command": "volume up", "repeat": 2})
+    await mcp_client.call_tool("harmony_start_activity", {"activity": "Watch Shield"})
+    result = await mcp_client.call_tool("harmony_send_command", {"command": "volume up", "repeat": 2})
     assert detail(result) == "Send VolumeUp x2 to Onkyo AV Receiver on Living Room"
-    await mcp_client.call_tool("send_command", {"command": "Pause"})
+    await mcp_client.call_tool("harmony_send_command", {"command": "Pause"})
     assert fake.presses() == [(ONKYO, "VolumeUp"), (ONKYO, "VolumeUp"), (SHIELD, "Pause")]
 
 
 async def test_send_command_to_a_device_works_while_off(mcp_client, fake):
-    result = await mcp_client.call_tool("send_command", {"command": "PowerOn", "device": "Onkyo AV Receiver"})
+    result = await mcp_client.call_tool("harmony_send_command", {"command": "PowerOn", "device": "Onkyo AV Receiver"})
     assert not result.is_error
     assert fake.presses() == [(ONKYO, "PowerOn")]
 
@@ -250,21 +250,21 @@ async def test_send_command_to_a_device_works_while_off(mcp_client, fake):
     ],
 )
 async def test_bad_sends_never_reach_the_hub(mcp_client, fake, args):
-    result = await mcp_client.call_tool("send_command", args)
+    result = await mcp_client.call_tool("harmony_send_command", args)
     assert result.is_error
     assert fake.sent == []
 
 
 async def test_a_command_from_another_device_is_not_a_back_door(mcp_client, fake):
     # PowerToggle exists, but on the TV: naming the Shield must not find it.
-    result = await mcp_client.call_tool("send_command", {"command": "PowerToggle", "device": "NVIDIA Shield"})
-    assert result.is_error and "has no command 'PowerToggle'" in text(result)
+    result = await mcp_client.call_tool("harmony_send_command", {"command": "PowerToggle", "device": "NVIDIA Shield"})
+    assert result.is_error and "has no 'PowerToggle'" in text(result)
     assert fake.sent == []
 
 
 async def test_unreachable_hub_explains_itself(mcp_client, fake):
     fake.push_disconnect()
-    result = await mcp_client.call_tool("send_command", {"command": "PowerOn", "device": "Onkyo AV Receiver"})
+    result = await mcp_client.call_tool("harmony_send_command", {"command": "PowerOn", "device": "Onkyo AV Receiver"})
     assert result.is_error and "Can't reach the Harmony hub 'Living Room'" in text(result)
 
 
@@ -274,8 +274,8 @@ async def test_unconfigured_server_still_answers_status(tmp_path, monkeypatch, f
     monkeypatch.delenv("HARMONY_HOSTS", raising=False)
     c = await connect(monkeypatch, factory)
     try:
-        assert (await c.call_tool("get_status", {})).structured_content == {"dry_run": False, "hubs": []}
-        result = await c.call_tool("power_off", {})
+        assert (await c.call_tool("harmony_get_status", {})).structured_content == {"dry_run": False, "hubs": []}
+        result = await c.call_tool("harmony_power_off", {})
         assert result.is_error and "check --host" in text(result)
     finally:
         await c.__aexit__(None, None, None)

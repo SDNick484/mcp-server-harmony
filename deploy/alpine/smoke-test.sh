@@ -68,7 +68,7 @@ STEP='file modes'
 [ "$(stat -c %U $STATE/config.json)" = mcp-harmony ]
 
 STEP='mcp over http'
-# A real MCP session against the service: initialize, then get_status, which
+# A real MCP session against the service: initialize, then harmony_get_status, which
 # must show the simulated hub reachable (so the service user's config.json was
 # read and aioharmony connected).
 URL=http://127.0.0.1:8713/harmony/mcp
@@ -82,7 +82,7 @@ curl -fsS $H -H "mcp-session-id: $SID" "$URL" -d '{"jsonrpc":"2.0","method":"not
 reachable=no
 for _ in $(seq 30); do
 	# shellcheck disable=SC2086
-	out=$(curl -fsS $H -H "mcp-session-id: $SID" "$URL" -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"get_status","arguments":{}}}')
+	out=$(curl -fsS $H -H "mcp-session-id: $SID" "$URL" -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"harmony_get_status","arguments":{}}}')
 	echo "$out" | grep -q '\\"reachable\\": *true\|"reachable": *true' && { reachable=yes; break; }
 	sleep 0.5
 done

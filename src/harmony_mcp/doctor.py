@@ -32,10 +32,11 @@ import aioharmony.hubconnector_websocket as ws_connector
 import aiohttp
 from aioharmony.harmonyapi import HarmonyAPI
 
-from .assumptions import contradicted, unverified
+from .assumptions import ASSUMPTIONS, contradicted, unverified
 from .catalog import Catalog
 from .config import HubSettings, Settings
 from .logsafe import redact
+from .registry import doctor_summary
 
 # Keys whose values identify your Logitech account; dropped from dumps.
 _PRIVATE_KEYS = ("email", "account", "token", "password", "user", "username")
@@ -283,4 +284,5 @@ def to_json(report: Report) -> str:
     doc["ok"] = report.ok
     for h, src in zip(doc["hubs"], report.hubs, strict=True):
         h["ok"] = src.ok
+    doc["assumptions"] = doctor_summary(ASSUMPTIONS)
     return redact(json.dumps(doc, indent=1))

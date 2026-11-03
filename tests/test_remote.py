@@ -81,6 +81,8 @@ def test_environment_then_flags():
         (["--bind", "0.0.0.0"], {}, "Refusing to serve on 0.0.0.0 without Cloudflare Access"),
         (["--path", "mcp"], {}, "must start with '/'"),
         (["--path", "/healthz"], {}, "can't be /healthz"),
+        ([], {"MCP_HTTP_PORT": "not-an-int"}, "must be an integer"),
+        ([], {"CF_ACCESS_TEAM_DOMAIN": "evil.com/path", "CF_ACCESS_AUD": AUD}, "must be a hostname"),
         ([], {"CF_ACCESS_TEAM_DOMAIN": TEAM}, "CF_ACCESS_AUD is empty"),
         # A public name means a tunnel or proxy, which reaches a loopback bind too.
         (["--public-host", "mcp.example.com"], {}, "Refusing --public-host mcp.example.com without Cloudflare Access"),
@@ -221,7 +223,15 @@ async def test_tools_work_with_a_valid_assertion_and_the_lifespan_runs_once():
 
 
 @pytest.mark.anyio
-@pytest.mark.parametrize("headers", [{}, {remote.ACCESS_HEADER: "garbage"}, {"authorization": "Bearer x"}])
+@pytest.mark.parametrize(
+    "headers",
+    [
+        {},
+        {remote.ACCESS_HEADER: "garbage"},
+        [(remote.ACCESS_HEADER.encode(), b"\xff\xfe")],
+        {"authorization": "Bearer x"},
+    ],
+)
 async def test_requests_without_a_valid_assertion_get_403(headers):
     async with running(CFG, []) as base, httpx2.AsyncClient() as http:
         body = {"jsonrpc": "2.0", "id": 1, "method": "ping"}
@@ -245,6 +255,7 @@ async def test_health_check_needs_no_assertion():
         (False, 503, {"status": "degraded", "error": "health check returned False"}),
         ({"status": "degraded", "hub": "offline"}, 503, {"status": "degraded", "hub": "offline"}),
         ({"error": "timeout"}, 503, {"status": "degraded", "error": "timeout"}),
+        ({"status": "ok", "error": "timeout"}, 503, {"status": "degraded", "error": "timeout"}),
     ],
 )
 async def test_health_check_custom_readiness(result, expected_status, expected_body):
@@ -263,7 +274,7 @@ async def test_health_check_exception_returns_503():
 
     async with running(CFG, [], health_check=broken) as base, httpx2.AsyncClient() as http:
         resp = await http.get(f"{base}/healthz")
-        assert (resp.status_code, resp.json()) == (503, {"status": "degraded", "error": "hub unreachable"})
+        assert (resp.status_code, resp.json()) == (503, {"status": "degraded", "error": "health check failed"})
 
 
 @pytest.mark.anyio
@@ -279,10 +290,12 @@ async def test_options_preflight_succeeds_without_assertion():
             == "content-type, cf-access-jwt-assertion, authorization, mcp-session-id, mcp-protocol-version"
         )
         assert resp.headers["access-control-max-age"] == "86400"
+        assert resp.headers["vary"] == "Origin"
 
         resp_no_origin = await http.options(f"{base}/thing/mcp")
         assert resp_no_origin.status_code == 204
         assert resp_no_origin.headers["access-control-allow-origin"] == "*"
+        assert resp_no_origin.headers["vary"] == "Origin"
 
 
 @pytest.mark.anyio
@@ -357,3 +370,88 @@ async def test_insecure_no_auth_serves_forwarded_requests_too():
     cfg = remote.HttpConfig(path="/thing/mcp", insecure_no_auth=True)
     async with running(cfg, []) as base, mcp_client(f"{base}/thing/mcp", {"x-forwarded-for": "192.168.1.20"}) as c:
         assert (await c.call_tool("ping", {})).content[0].text == "pong"
+
+
+@pytest.mark.anyio
+async def test_health_check_refuses_forwarded_when_local_only():
+    async with running(LOCAL, []) as base, httpx2.AsyncClient() as http:
+        resp = await http.get(f"{base}/healthz", headers={"x-forwarded-for": "203.0.113.7"})
+        assert resp.status_code == 403 and resp.json() == {"error": "forbidden"}
+
+
+@pytest.mark.anyio
+async def test_health_check_head_request():
+    async with running(CFG, []) as base, httpx2.AsyncClient() as http:
+        resp = await http.head(f"{base}/healthz")
+        assert resp.status_code == 200
+
+
+@pytest.mark.anyio
+async def test_health_check_non_get_head_requires_assertion():
+    async with running(CFG, []) as base, httpx2.AsyncClient() as http:
+        resp = await http.post(f"{base}/healthz")
+        assert resp.status_code == 403 and resp.json() == {"error": "forbidden"}
+
+
+@pytest.mark.anyio
+async def test_jwks_dos_protection_throttles_unknown_kid(monkeypatch):
+    class FakeKey:
+        def __init__(self, key_id: str) -> None:
+            self.key_id = key_id
+
+    class FakeJWKSet:
+        def __init__(self, keys: list[FakeKey]) -> None:
+            self.keys = keys
+
+    class FakeCache:
+        def __init__(self, jwk_set: FakeJWKSet) -> None:
+            self._set = jwk_set
+
+        def is_expired(self) -> bool:
+            return False
+
+        def get(self) -> FakeJWKSet:
+            return self._set
+
+    calls = 0
+
+    class FakePyJWKClient:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            self.jwk_set_cache = FakeCache(FakeJWKSet([FakeKey("known-kid")]))
+
+        def get_signing_key_from_jwt(self, _token: str) -> object:
+            nonlocal calls
+            calls += 1
+            raise jwt.PyJWKClientError("unknown kid")
+
+    monkeypatch.setattr(jwt, "PyJWKClient", FakePyJWKClient)
+    # Start clock near 0 to ensure freshly booted machines (monotonic < 60s) don't falsely throttle first fetch
+    fake_now = [5.0]
+    monkeypatch.setattr(time, "monotonic", lambda: fake_now[0])
+
+    verifier = remote.AccessVerifier(POLICY)
+    headers1 = {"kid": "unknown-1"}
+    headers2 = {"kid": "unknown-2"}
+    headers3 = {"kid": "unknown-3"}
+    now = int(time.time())
+    claims = {"iss": f"https://{TEAM}", "aud": [AUD], "iat": now, "exp": now + 300, "email": "user@example.com"}
+    tok1 = jwt.encode(claims, KEY, algorithm="RS256", headers=headers1)
+    tok2 = jwt.encode(claims, KEY, algorithm="RS256", headers=headers2)
+    tok3 = jwt.encode(claims, KEY, algorithm="RS256", headers=headers3)
+
+    # First unknown kid triggers fetch
+    with pytest.raises(remote.AccessDenied, match="unknown kid"):
+        await verifier.verify(tok1)
+    assert calls == 1
+
+    # Second unknown kid within min_refetch_interval throttles without network fetch
+    fake_now[0] = 10.0
+    with pytest.raises(remote.AccessDenied, match="Unable to find a signing key"):
+        await verifier.verify(tok2)
+    assert calls == 1
+
+    # After min_refetch_interval passes, network fetch is allowed again
+    fake_now[0] = 70.0
+    with pytest.raises(remote.AccessDenied, match="unknown kid"):
+        await verifier.verify(tok3)
+    assert calls == 2

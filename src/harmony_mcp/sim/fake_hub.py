@@ -135,7 +135,7 @@ class FakeHub:
         app.router.add_get("/", self._websocket)
         self._runner = web.AppRunner(app, access_log=None)
         await self._runner.setup()
-        site = web.TCPSite(self._runner, self.host, self.port)
+        site = web.TCPSite(self._runner, self.host, self.port, reuse_port=True)
         await site.start()
         if self.port == 0:
             server = site._server
