@@ -14,6 +14,13 @@
 ### Documentation
 
 - `HARDWARE_VALIDATION.md` step 7: the Office Hub results for `hold_ms` (held presses acted as one tap on the LG TV and Onkyo). `H-HOLD` is unchanged in `assumptions.py` until a configured hold action is checked.
+- `HARDWARE_VALIDATION.md` steps 6, 8 and 9: results of the 2026-11-04 run on the Office and Bedroom hubs (presses, start/switch, multi-hub power off, the busy guard, config push, reconnect), with what each did not show.
+
+### Assumptions (hardware, 2026-11-04)
+
+- `H-FORCE-OFF` is now `hardware-contradicted`: a forced power off sent during a start from the physical remote was refused by the hub ("Activity in progress"). `power_off(force=true)` is unchanged; it still skips this server's own busy guard, but the hub can refuse it. README and CLAUDE.md say so. Whether `force` helps a hub that is really stuck is untested.
+- `H-CONFIG-PUSH` is now `hardware-verified`: an activity renamed in the Harmony app showed up in `harmony_list_activities` with no restart.
+- `H-RECONNECT` stays `simulator-only`, with a note: a hub unplugged and replugged came back `reachable: true` on its own, but the re-read of state after a reconnect wasn't exercised.
 
 ## [0.2.0] - 2026-10-28
 

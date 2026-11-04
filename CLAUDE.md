@@ -71,6 +71,9 @@ explain the reasoning behind non-obvious changes instead of only making them.
   sequence is running). Keep that guard: a press mid-sequence can hit a device still warming up.
   The only bypass is `power_off(force=True)` (ASSUMPTION H-FORCE-OFF), which still takes a rate-limit
   token. A start it overtakes raises "interrupted" instead of writing its state back (`_runs`).
+  H-FORCE-OFF is `hardware-contradicted` (2026-11-04): during a normal start the hub itself answered
+  "Activity in progress" and refused the power off, so `force` only skips *our* guard; it does not make
+  the hub interrupt a start. Don't describe it as doing more than that.
 - Raise `HarmonyError` (a `ToolError`) for anything the model or user can act on.
 - **Don't invent protocol details.** Anything not confirmed on hardware is an `Assumption`, cited
   as `# ASSUMPTION <id>` where code depends on it, in README's table and HARDWARE_VALIDATION.md.
@@ -105,8 +108,9 @@ explain the reasoning behind non-obvious changes instead of only making them.
 
 ## Status
 
-Partly verified on real hubs (2026-10-14: connect, status, names, power off; see the `hardware-verified`
-entries in `assumptions.py`); everything else against the simulator only. HARDWARE_VALIDATION.md is the checklist (`doctor` points at
+Partly verified on real hubs (2026-10-14: connect, status, names, power off; 2026-11-04: presses, activity
+start/switch, the busy guard, multi-hub rules, config push, reconnect; see the `hardware-verified` and
+`hardware-contradicted` entries in `assumptions.py`); everything else against the simulator only. HARDWARE_VALIDATION.md is the checklist (`doctor` points at
 its step 3, so keep the numbering). Captures from `doctor --dump` go in
 `tests/fixtures/recorded/`. Cross-project fact from mcp-server-shieldtv: the hub is also the
 Shield's Bluetooth keyboard ("Harmony Keyboard"); after a Shield reboot it can be stuck, and the

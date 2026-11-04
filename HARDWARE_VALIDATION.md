@@ -154,6 +154,28 @@ fail, the error text and the `-v` log lines are what to record.
 
 Confirms: **H-PRESS-SILENT**.
 
+**Observed (2026-11-04, Office Hub with an Onkyo receiver and an LG TV, through the server from a Claude
+session).** The tool names carry the `harmony_` prefix there.
+
+- Mute twice, then four in a burst, then `repeat=10 delay_ms=100`: all returned `"outcome": "done"` with the
+  presses listed in `sent`; nothing was refused or throttled.
+- A harder run: five `send_command` calls in a row, each `Mute` with `repeat=10 delay_ms=100` (50 presses).
+  All five returned `done` with 10 `sent` entries. Mute is a toggle and 50 is even, and the owner confirmed
+  the Onkyo ended unmuted, as it started, so every press took effect and none was dropped.
+- That run did **not** show whether this server's own limiter fires. The press bucket is 20 in a burst, then
+  4 a second per hub (`limits.py`), and the five calls were not timed, so it is unknown whether they landed
+  close enough together to exceed it. Treat the limiter as covered by `test_safety.py` only. A real check
+  would time the calls and send more than 20 presses inside one second or two.
+- Device-targeted and activity-routed commands both worked. A wrong command or device name returned an
+  error listing the valid names. Activity, device and command refs are case-insensitive, and a bare device
+  name resolves when only one hub has it.
+- `send_command` with no `device` and no running activity was refused: "No activity is running on
+  <hub>. Name a device, or start an activity first."
+
+No press was ever rejected, so **H-PRESS-ERROR** is still untriggered. **H-PRESS-SILENT** stays
+`simulator-only`: that claim is about what is on the wire (no reply frame on success), and no `-v` frames were
+captured through the server. Only "no press was reported rejected" is shown.
+
 ## 7. Holding a button
 
 ```sh
@@ -201,6 +223,27 @@ hub reply to it at all, and with which code), and whether any device was left on
 
 Confirms: **H-POWEROFF**, **H-FORCE-OFF** (record the reply and any device left on in `note`).
 
+**Observed (2026-11-04, Office Hub and Bedroom Hub, through the server from a Claude session).**
+
+- `start_activity` on the activity that is already running returns `"outcome": "unchanged"` with `sent: []`;
+  nothing is sent. Switching activities on a hub needed no power off first.
+- `start_activity` once returned "Bad Gateway" although the activity did start; the response was lost, not the
+  start. Check `get_status` before retrying.
+- With both hubs on, `power_off` with no `hub` was refused ("Several hubs are on (...); pass hub, or
+  hub='all'"). `hub="Bedroom Hub"` turned off only that hub, and `hub="all"` turned off both.
+- **Forced power off (H-FORCE-OFF), Bedroom Hub.** The owner started "SHIELD TV" from the physical remote.
+  `get_status` showed `transition: "starting SHIELD TV"`, and `power_off(hub="Bedroom Hub", force=true)` was
+  sent a few seconds into it. It failed with `Bedroom Hub refused 'power off': Activity in progress`. That text
+  is the hub's own reply `msg` (aioharmony returns it as `(False, msg)` for any code other than 100 or 200;
+  the string does not exist in aioharmony). `get_status` kept showing the transition, and the start then
+  finished on its own (within about two minutes of the press; not timed): `power: on`, SHIELD TV running. A plain
+  `power_off(hub="Bedroom Hub")` after that returned `done` with `runactivity activityId=-1 (power off)`, and
+  `get_status` showed the hub off with `transition: null`. The owner's experience is that the physical remote
+  ignores Off during a start too. **H-FORCE-OFF is hardware-contradicted** (one trial). Not captured: the
+  reply code, and whether the hub answered the interrupted start separately, since no `-v` log was taken
+  through the server. Still untested: `force` on a hub that is actually stuck. It would at least get past
+  this server's own busy guard there, but nobody has seen a stuck hub yet.
+
 ## 9. With Claude: config changes and reconnects
 
 These need a long-running server, so use Claude Code (or Claude Desktop) with it added:
@@ -229,6 +272,29 @@ claude mcp add harmony -- "$(pwd)/.venv/bin/mcp-server-harmony"
 
 Confirms: **H-CONFIG-PUSH** (step 2), **H-RECONNECT** (step 3).
 
+**Observed (2026-11-04, through the server from a Claude session; items 5 and 6 not run).**
+
+- **Step 2, config push: passed.** The Office Hub's "Office Xbox" was renamed to "Office Xbox 2" in the
+  Harmony app; `list_activities` showed the new name on the first call after the owner said it was done, with
+  the other six names unchanged and no restart of the server. After renaming it back, the original name
+  returned the same way. The delay was not timed, only that it was under the time it took to switch to
+  Claude. **H-CONFIG-PUSH is hardware-verified** (end to end; the push frame itself wasn't captured).
+- **Step 3, reconnect: partly run.** The Bedroom Hub was unplugged for a couple of minutes. `get_status` said
+  `reachable: true` for the first two polls after the unplug, then `reachable: false`, so a hub that just
+  dropped can look reachable for a minute or two. After it was plugged back in, `reachable` went back to
+  `true` by the next check, about a minute later, with no restart. **Deviation from the step:** the
+  activity was started from the *Office* remote (that hub stayed up and showed "Office Xbox" correctly),
+  not from the unplugged hub's own remote, and the Bedroom Hub was off the whole time. So nothing changed
+  on the dropped hub while it was away, and the **re-read after reconnect was not exercised**.
+  **H-RECONNECT stays `simulator-only`** with a partial note. To finish it: unplug the hub while an
+  activity is running, change what it is running from its remote (or end it), plug it back in, and check
+  that `get_status` shows the new state without a restart.
+- **Step 4, the busy guard: refusal seen.** During a start from the physical remote a press was refused with
+  "Office Hub is busy starting Office Playstation 5; send Exit once it finishes (check get_status)". Parallel
+  tool calls in that harness ran one after another, so the guard can only be provoked by a start from
+  elsewhere. `get_status` showed `current_activity` lagging the transition, and the owner's remote press
+  chained Xbox, then PS5.
+
 ---
 
 ## Which step confirms what
@@ -238,16 +304,16 @@ Confirms: **H-CONFIG-PUSH** (step 2), **H-RECONNECT** (step 3).
 | `H-PORT`           | 2    | high              |                                                           |
 | `H-PROVISION`      | 2    | high              |                                                           |
 | `H-FRAMES`         | 3    | high              |                                                           |
-| `H-CONFIG-SHAPE`   | 3    | high              | via `test_recorded`                                       |
+| `H-CONFIG-SHAPE`   | 3    | high              | via `test_recorded`; commands resolved on hardware 2026-11-04, replay still to do |
 | `H-POWEROFF`       | 8    | high              |                                                           |
 | `H-NAME`           | 2    | high              |                                                           |
 | `H-START-SEQUENCE` | 5    | medium            | the order of frames, from the `-v` log                    |
-| `H-FORCE-OFF`      | 8    | low               | needs a start from the physical remote in progress        |
-| `H-PRESS-SILENT`   | 6    | medium            |                                                           |
+| `H-FORCE-OFF`      | 8    | low               | **contradicted 2026-11-04**: the hub refused it mid-start ('Activity in progress') |
+| `H-PRESS-SILENT`   | 6    | medium            | no press reported rejected 2026-11-04; no `-v` frames, so still simulator-only |
 | `H-PRESS-ERROR`    | none | low               | can't be triggered with commands from the hub's own config |
 | `H-HOLD`           | 7    | low               | Office Hub: held presses acted as one tap (see step 7)    |
-| `H-CONFIG-PUSH`    | 9    | medium            |                                                           |
-| `H-RECONNECT`      | 9    | high              | also confirms the re-read after reconnect                 |
+| `H-CONFIG-PUSH`    | 9    | medium            | **verified 2026-11-04** (rename showed up, no restart)    |
+| `H-RECONNECT`      | 9    | high              | also confirms the re-read after reconnect; 2026-11-04 reconnect seen, re-read not exercised |
 | `H-SSDP`           | 1    | medium            | no answer can be the network, not the hub                 |
 | `H-TIMING`         | 5    | low               |                                                           |
 

@@ -231,10 +231,12 @@ Two hubs that both have "Listen to Music". (Output from `simulate`, trimmed.)
 - **No interleaving with activity sequences.** While a hub is starting an activity or powering
   off, its commands are refused with "busy, try again", since a press mid-sequence can land on
   a device that's still warming up. The one exception is `power_off(force=true)`, for a sequence
-  that never finishes (a device that never answers its warm-up): it sends the power off anyway,
-  like holding Off on the remote. It still counts against the rate limit, and with no `hub` it
-  only acts on hubs that are on or mid-sequence. What the hub does with a power off mid-sequence
-  is `H-FORCE-OFF`, not yet seen on hardware.
+  that never finishes (a device that never answers its warm-up): it skips this server's own busy
+  guard and sends the power off anyway. It still counts against the rate limit, and with no `hub`
+  it only acts on hubs that are on or mid-sequence. The hub itself can still say no: on a real hub
+  a forced power off during a normal start was refused with "Activity in progress", just as the
+  physical remote ignores Off then (`H-FORCE-OFF`, hardware-contradicted). Whether `force` helps a
+  hub that is truly stuck hasn't been tested.
 - **Rate limits and caps, per hub.** Per call: at most 10 repeats, held up to 3 s, 100-2000 ms
   apart, 15 s in total. Across calls (a model in a loop): 20 presses in a burst, then 4 a
   second; 4 activity changes in a burst, then one per 15 s. A call over the limit is refused
@@ -258,7 +260,7 @@ Two hubs that both have "Listen to Music". (Output from `simulate`, trimmed.)
 | `No Harmony hub configured.`                              | Run `check --host <ip>` once per hub, or set `HARMONY_HOSTS` (in the client's config)         |
 | `Can't reach the Harmony hub 'Den' at ...`                | Offline, its IP changed, or TCP 8088 is blocked (a VLAN in between). Other hubs keep working |
 | `... exists on Living Room, Den; pass hub to choose.`     | The name is on more than one hub: the model should ask which TV, or use a ref                |
-| `Den is busy starting ...`                                | An activity is mid-sequence. Wait until `harmony_get_status` shows `transition: null`; if it never clears, `harmony_power_off(force=true)` |
+| `Den is busy starting ...`                                | An activity is mid-sequence. Wait until `harmony_get_status` shows `transition: null`; if it never clears, `harmony_power_off(force=true)` (the hub may still refuse a power off mid-start, "Activity in progress") |
 | `Rate limit: refusing to ...`                             | Many presses in a short time. Wait and retry if it was deliberate                            |
 
 `doctor` says which layer failed for each hub and what to check.
@@ -298,7 +300,8 @@ What the tests cover:
 
 These are the protocol assumptions the code depends on (claim, source, and for verified ones the
 evidence, in `src/harmony_mcp/assumptions.py`). `hardware-verified` means seen working on a real hub;
-the rest are verified against the simulator only:
+`hardware-contradicted` means a real hub did something else; the rest are verified against the
+simulator only:
 
 | Assumption         | Confidence | Status         |
 | ------------------ | ---------- | -------------- |
@@ -309,11 +312,11 @@ the rest are verified against the simulator only:
 | `H-POWEROFF`       | high       | hardware-verified |
 | `H-NAME`           | high       | hardware-verified |
 | `H-START-SEQUENCE` | medium     | simulator-only |
-| `H-FORCE-OFF`      | low        | simulator-only |
+| `H-FORCE-OFF`      | low        | hardware-contradicted |
 | `H-PRESS-SILENT`   | medium     | simulator-only |
 | `H-PRESS-ERROR`    | low        | simulator-only |
 | `H-HOLD`           | low        | simulator-only |
-| `H-CONFIG-PUSH`    | medium     | simulator-only |
+| `H-CONFIG-PUSH`    | medium     | hardware-verified |
 | `H-RECONNECT`      | high       | simulator-only |
 | `H-SSDP`           | medium     | simulator-only |
 | `H-TIMING`         | low        | simulator-only |
