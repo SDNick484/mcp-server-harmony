@@ -35,6 +35,9 @@ __all__ = ["ASSUMPTIONS", "BY_ID", "Assumption", "contradicted", "doctor_lines",
 
 # Hardware runs, cited by the notes below.
 _HW_2026_10_14 = "2026-10-14, two real hubs (Harmony Hub, Office Hub, firmware 4.15.600) via the service on LXC210"
+_HW_2026_11_04 = (
+    "2026-11-04, Office Hub and Bedroom Hub (firmware 4.15.600) driven through this server from a Claude session"
+)
 
 ASSUMPTIONS: tuple[Assumption, ...] = (
     Assumption(
@@ -70,7 +73,9 @@ ASSUMPTIONS: tuple[Assumption, ...] = (
         "aioharmony json_config and _get_config",
         "high",
         note="Partial, " + _HW_2026_10_14 + ": the running activity's id (32845636) resolved to its name "
-        "through the parsed config. Devices and commands not exercised yet.",
+        "through the parsed config. Also partial, " + _HW_2026_11_04 + ": commands resolved through the running "
+        "activity's control groups and straight to named devices (an LG TV and an Onkyo receiver) and were "
+        "accepted. Not replayed with `doctor --dump` and test_recorded, which is the step this needs.",
     ),
     Assumption(
         "H-POWEROFF",
@@ -105,6 +110,14 @@ ASSUMPTIONS: tuple[Assumption, ...] = (
         "none: aioharmony allows the overlap (each runactivity has its own msgid, no lock); the fake hub just "
         "runs the power off",
         "low",
+        status="hardware-contradicted",
+        note=_HW_2026_11_04 + ": power_off(hub='Bedroom Hub', force=True) was sent while a start from the "
+        "physical remote (SHIELD TV) was still running. The hub refused it: its reply msg was 'Activity in "
+        "progress', which aioharmony returns as (False, msg) for any code other than 100 or 200, shown here as "
+        "\"Bedroom Hub refused 'power off': Activity in progress\". The start then finished normally and a plain "
+        "power_off afterwards worked. Matches the physical remote, where Off is ignored mid-start. One trial. "
+        "The reply code and the interrupted start's own reply were not captured (no -v log). force still skips "
+        "this server's own busy guard; whether it helps a hub that is truly stuck is untested.",
     ),
     Assumption(
         "H-PRESS-SILENT",
@@ -132,6 +145,11 @@ ASSUMPTIONS: tuple[Assumption, ...] = (
         "(syncStatus not 1); aioharmony then refetches the config.",
         "aioharmony _notification_callback",
         "medium",
+        status="hardware-verified",
+        note=_HW_2026_11_04 + ": an Office Hub activity was renamed in the Harmony app (Office Xbox to Office "
+        "Xbox 2) and list_activities showed the new name on the first call after the rename, with no restart of "
+        "this server; renaming it back showed the old name the same way. Seen end to end only: the stateDigest "
+        "frame with the new configVersion was not captured (no -v log) and the delay was not timed.",
     ),
     Assumption(
         "H-RECONNECT",
@@ -139,6 +157,12 @@ ASSUMPTIONS: tuple[Assumption, ...] = (
         "and calls the disconnect and connect callbacks.",
         "aioharmony hubconnector_websocket._reconnect",
         "high",
+        note="Partial, " + _HW_2026_11_04 + ": the Bedroom Hub was unplugged for a couple of minutes. get_status "
+        "kept saying reachable: true for two polls, then reachable: false, then reachable: true about a minute "
+        "after it was plugged back in, with no restart of this server. Not shown: the re-read after a reconnect "
+        "(the hub was off throughout, so no state changed while it was away), the 1 s to 30 s retry timing, and "
+        "the callbacks themselves. The Office Hub stayed reachable throughout and showed an activity started "
+        "from its remote.",
     ),
     Assumption(
         "H-SSDP",
