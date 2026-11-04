@@ -11,6 +11,10 @@
 
 - **Network Topology Masking:** Internal hub LAN IPv4 addresses in `harmony_get_status` payloads are sanitized with `mask_ip` (e.g. `192.0.2.20` -> `x.x.x.20`) to prevent leaking local network topology to LLMs over stdout.
 
+### Documentation
+
+- `HARDWARE_VALIDATION.md` step 7: the Office Hub results for `hold_ms` (held presses acted as one tap on the LG TV and Onkyo). `H-HOLD` is unchanged in `assumptions.py` until a configured hold action is checked.
+
 ## [0.2.0] - 2026-10-28
 
 ### Added

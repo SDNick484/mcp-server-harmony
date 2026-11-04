@@ -166,6 +166,19 @@ should say which it is.
 
 Confirms: **H-HOLD** (record the behavior in `note`).
 
+**Observed (2026-11-04, Office Hub, manual session).** A held press did not repeat:
+
+- `VolumeDown` with `hold_ms=200` on the Onkyo AV Receiver lowered the volume by one step.
+- `Settings` pressed twice quickly, then `hold_ms=2000` on the LG TV (OLED65C7P): the held press
+  behaved like one tap.
+- `2` with `hold_ms=1000` on the LG TV: one press was sent; the on-screen effect was not recorded.
+
+Harmony's detail string reports `held <n> ms`, but that only shows the timing was applied. It
+doesn't show what the device received. The likely explanation: a button's hold behavior is its
+own configured hold action in the Harmony setup, which falls back to the tap action when none is
+set. Not verified: whether any button has a configured hold action. Until it is, `hold_ms` should
+be treated as a tap with a timed press, not a sustained hold.
+
 ## 8. Power off
 
 ```sh
@@ -232,7 +245,7 @@ Confirms: **H-CONFIG-PUSH** (step 2), **H-RECONNECT** (step 3).
 | `H-FORCE-OFF`      | 8    | low               | needs a start from the physical remote in progress        |
 | `H-PRESS-SILENT`   | 6    | medium            |                                                           |
 | `H-PRESS-ERROR`    | none | low               | can't be triggered with commands from the hub's own config |
-| `H-HOLD`           | 7    | low               | record which behavior you saw                             |
+| `H-HOLD`           | 7    | low               | Office Hub: held presses acted as one tap (see step 7)    |
 | `H-CONFIG-PUSH`    | 9    | medium            |                                                           |
 | `H-RECONNECT`      | 9    | high              | also confirms the re-read after reconnect                 |
 | `H-SSDP`           | 1    | medium            | no answer can be the network, not the hub                 |
