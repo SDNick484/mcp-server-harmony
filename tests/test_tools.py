@@ -113,6 +113,12 @@ async def test_get_status_publishes_output_schema(mcp_client):
 
 
 # --- tools/call --------------------------------------------------------------
+async def test_initialize_reports_the_package_version(mcp_client):
+    from harmony_mcp import __version__
+
+    assert mcp_client.server_info.version == __version__
+
+
 async def test_get_status(mcp_client):
     result = await mcp_client.call_tool("harmony_get_status", {})
     assert result.structured_content == {
@@ -274,7 +280,8 @@ async def test_unconfigured_server_still_answers_status(tmp_path, monkeypatch, f
     monkeypatch.delenv("HARMONY_HOSTS", raising=False)
     c = await connect(monkeypatch, factory)
     try:
-        assert (await c.call_tool("harmony_get_status", {})).structured_content == {"dry_run": False, "hubs": []}
+        status = (await c.call_tool("harmony_get_status", {})).structured_content
+        assert status["hubs"] == [] and "check --host" in status["hint"]
         result = await c.call_tool("harmony_power_off", {})
         assert result.is_error and "check --host" in text(result)
     finally:

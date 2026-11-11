@@ -1,0 +1,65 @@
+name: Hardware report
+description: What worked (and didn't) on your Harmony hub. Reports that everything worked are just as useful.
+title: "Hardware report: <hub>, <firmware>"
+labels: ["hardware-report"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for testing. This server has run on two Harmony Hubs; the rest of its protocol details have
+        only run against a simulator. Each report moves an assumption in `assumptions.py` from
+        "simulator-only" to confirmed or disproved.
+
+        **Before pasting anything:** `doctor` masks IP addresses and MACs by default (don't use
+        `--no-redact` here).
+  - type: input
+    id: hub
+    attributes:
+      label: Hub and remote
+      description: e.g. "Harmony Hub with an Elite remote", "Harmony Companion". How many hubs you run.
+    validations:
+      required: true
+  - type: input
+    id: firmware
+    attributes:
+      label: Hub firmware
+      description: "`harmony_get_status` reports it (e.g. 4.15.600). \"Unknown\" is fine."
+  - type: input
+    id: platform
+    attributes:
+      label: Where mcp-server-harmony runs
+      description: OS, Python version, and how it's run (stdio from Claude Desktop/Code, uvx, the Alpine service, ...)
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: "`mcp-server-harmony doctor` output"
+      description: Run it with the same settings the server uses.
+      render: text
+    validations:
+      required: true
+  - type: checkboxes
+    id: worked
+    attributes:
+      label: What worked
+      description: Tick what you tried and saw work on the real devices. Leave the rest unticked and say what happened below.
+      options:
+        - label: "`discover` found the hub (SSDP)"
+        - label: "`check --host` added the hub with its name"
+        - label: list_activities / list_devices / list_commands show the right names
+        - label: start_activity turns the devices on, and returns "done" once they're on
+        - label: power_off turns them off, and returns "done"
+        - label: send_command with no device reaches the right device through the running activity
+        - label: send_command with hold_ms behaves like holding the button
+        - label: An activity renamed in the Harmony app shows up without restarting the server
+        - label: After the hub drops off the network and comes back, get_status shows its current activity
+        - label: Several hubs, with a repeated activity name, ask which hub instead of guessing
+  - type: textarea
+    id: details
+    attributes:
+      label: What didn't work, or surprised you
+      description: |
+        What you asked for, what happened, and the tool's reply. If you followed HARDWARE_VALIDATION.md,
+        say which steps passed. A `call -v start_activity ...` log (frames, addresses redacted) is welcome:
+        it would confirm H-START-SEQUENCE.

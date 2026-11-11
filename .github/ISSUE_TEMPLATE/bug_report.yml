@@ -1,0 +1,43 @@
+name: Bug report
+description: Something in mcp-server-harmony itself is wrong (a crash, a wrong reply, bad docs).
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        If the question is whether a feature works on your hub, use the **Hardware report** template instead.
+
+        `doctor` and the server's log mask IP addresses and MACs by default. Keep it that way when pasting
+        here (don't use `--no-redact`).
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what you expected
+      description: The tool you called (or the command you ran), its arguments, and the reply or error.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: "`mcp-server-harmony --version`, or the commit if installed from git"
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Where mcp-server-harmony runs
+      description: OS, Python version, and how it's run (stdio from Claude Desktop/Code, uvx, the Alpine service, ...)
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: "`mcp-server-harmony doctor` output"
+      render: text
+  - type: textarea
+    id: log
+    attributes:
+      label: Server log around the problem
+      description: For the Alpine service, /var/log/mcp-server-harmony/server.log. `serve -v` logs more.
+      render: text

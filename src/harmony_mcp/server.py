@@ -34,17 +34,18 @@ import json
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import Annotated, Literal
+from typing import Annotated, Literal, NotRequired
 from urllib.parse import unquote
 
 from mcp.server import MCPServer
 from pydantic import Field
 from typing_extensions import TypedDict
 
+from . import __version__
 from .catalog import Catalog, Command
 from .client import HarmonyError, HubClient, Outcome, Status
 from .config import load_settings
-from .hubs import ALL, HubRegistry, ref
+from .hubs import ALL, NO_HUBS, HubRegistry, ref
 from .limits import MAX_DELAY_MS, MAX_HOLD_MS, MAX_REPEAT, MIN_DELAY_MS
 from .lookup import unknown_with_suggestions
 from .tools import ACT, ACT_IDEMPOTENT, READ_ONLY
@@ -81,6 +82,7 @@ async def lifespan(_server: MCPServer) -> AsyncIterator[None]:
 
 mcp = MCPServer(
     "harmony",
+    version=__version__,  # serverInfo.version in initialize, so a bug report says which build answered
     instructions=(
         "Controls Logitech Harmony Hubs, usually one per TV. Call harmony_get_status first: it lists each hub by name, "
         "whether it is on, and its running activity. Prefer activities: harmony_start_activity (e.g. 'Watch Shield') "
@@ -109,6 +111,7 @@ Hub = Annotated[
 class HubsStatus(TypedDict):
     dry_run: bool  # true: writes are reported, not sent
     hubs: list[Status]
+    hint: NotRequired[str]  # only with no hub configured: how to add one
 
 
 class ActivityInfo(TypedDict):
@@ -175,7 +178,11 @@ async def harmony_get_status() -> HubsStatus:
     clears. dry_run true means this server reports writes instead of sending them.
     """
     r = await ready_hubs()
-    return {"dry_run": r.settings.dry_run, "hubs": [h.snapshot() for h in r.hubs]}
+    status: HubsStatus = {"dry_run": r.settings.dry_run, "hubs": [h.snapshot() for h in r.hubs]}
+    if not r.hubs:
+        # A first run: an empty list alone reads as "you have no hubs", so say how to add one.
+        status["hint"] = NO_HUBS
+    return status
 
 
 @mcp.tool(title="List activities", annotations=_READ)
