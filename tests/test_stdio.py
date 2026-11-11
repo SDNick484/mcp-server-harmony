@@ -28,4 +28,5 @@ async def test_serve_over_stdio(tmp_path):
     env.pop("HARMONY_HOSTS", None)
     async with Client(StdioServerParameters(command=exe, args=[], env=env)) as c:
         assert {t.name for t in (await c.list_tools()).tools} == TOOL_NAMES
-        assert (await c.call_tool("harmony_get_status", {})).structured_content == {"dry_run": False, "hubs": []}
+        status = (await c.call_tool("harmony_get_status", {})).structured_content
+        assert status is not None and status["hubs"] == [] and "check --host" in status["hint"]

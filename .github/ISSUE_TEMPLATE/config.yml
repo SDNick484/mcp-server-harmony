@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Hardware validation checklist
+    url: https://github.com/SDNick484/mcp-server-harmony/blob/main/HARDWARE_VALIDATION.md
+    about: Step-by-step checks to run on your hubs before (or instead of) filing a hardware report.
+  - name: What each protocol detail is based on
+    url: https://github.com/SDNick484/mcp-server-harmony/blob/main/src/harmony_mcp/assumptions.py
+    about: Every assumption about the hub, its source, and whether hardware has confirmed it.

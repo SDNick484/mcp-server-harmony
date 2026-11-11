@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+### Added
+
+- `initialize` reports the package version as `serverInfo.version` (it was empty), so a bug report says which build answered.
+- `harmony_get_status` with no hub configured adds a `hint` saying how to add one, instead of an empty list alone.
+- `scripts/smoke_stdio.py`: launches an installed server over stdio as an MCP client does and checks the first exchange. CI's new `wheel-smoke` job runs it against the built wheel on Linux, macOS and Windows; the release workflow runs it before publishing.
+- Issue templates: a bug report and a hardware report.
+
+### Documentation
+
+- README: the status reflects the 2026-11-04 hardware run; a Claude Desktop config using `uvx`; absolute links, so they work on PyPI.
+
 ## [0.3.0] - 2026-11-10
 
 The v0.2.0 tag never reached PyPI (it pointed at a commit still versioned 0.1.0), so this release carries 0.2.0's changes too.

@@ -8,13 +8,17 @@ Assistant and no Logitech cloud. It lets an MCP client such as Claude start and 
 activities, press buttons, and read what's on. It works with any remote paired to a hub (Elite,
 Companion, 950), since the server talks to the hub, not the remote.
 
-> **Status: first contact with real hubs done (2026-10-14).** Two hubs connected, reported their
-> state and names, and powered off on request. Starting activities, button presses, reconnects
-> and config pushes are still verified against the simulator only: the tests run the real
-> aioharmony library against a wire-level fake hub. Every protocol detail that hasn't been
-> confirmed on hardware is a named assumption (see
+> **Status: alpha, looking for testers.** Run on two Harmony Hubs (2026-10-14 and 2026-11-04):
+> connecting, status and names, starting and switching activities, button presses (routed through
+> the running activity and sent to a named device), power off on one hub and on `all`, the busy
+> guard, and an activity renamed in the Harmony app showing up without a restart. Still
+> simulator-only: SSDP discovery, the exact frames of a start and a press, held buttons, and
+> re-reading state after a reconnect. Every protocol detail is a named assumption (see
 > [Verification status](#verification-status)), and
-> [HARDWARE_VALIDATION.md](HARDWARE_VALIDATION.md) is the checklist for confirming them.
+> [HARDWARE_VALIDATION.md](https://github.com/SDNick484/mcp-server-harmony/blob/main/HARDWARE_VALIDATION.md)
+> is the checklist for confirming them. If you have a hub, a
+> [hardware report](https://github.com/SDNick484/mcp-server-harmony/issues/new?template=hardware_report.yml)
+> of what worked on yours is the most useful thing you can send.
 
 Not affiliated with Logitech. Built on [aioharmony](https://github.com/Harmony-Libs/aioharmony),
 the library behind Home Assistant's Harmony integration.
@@ -89,17 +93,24 @@ hub's config for `tests/fixtures/recorded/`.
 
 ## Use it with an MCP client
 
-Local (stdio): Claude Code and Claude Desktop launch it themselves.
+Local (stdio): Claude Code and Claude Desktop launch it themselves. With
+[uv](https://docs.astral.sh/uv/) installed, `uvx` fetches and runs the published package, so there's no
+venv to manage. In Claude Desktop's `claude_desktop_config.json`:
 
 ```json
 {
   "mcpServers": {
-    "harmony": { "command": "/path/to/mcp-server-harmony/.venv/bin/mcp-server-harmony" }
+    "harmony": { "command": "uvx", "args": ["mcp-server-harmony"] }
   }
 }
 ```
 
-For Claude Code: `claude mcp add harmony -- /path/to/.venv/bin/mcp-server-harmony`.
+Or point `command` at the venv you installed into (`~/.venvs/harmony/bin/mcp-server-harmony`; on
+Windows, `...\Scripts\mcp-server-harmony.exe`). Run `check` first (`uvx mcp-server-harmony check --host <ip>`):
+the server reads the hubs from its `config.json`, so the client config needs no settings. Claude Desktop doesn't
+see your shell's `PATH`, so if it can't start `uvx`, give its full path (`which uvx`, or `where uvx` on Windows).
+
+For Claude Code: `claude mcp add harmony -- uvx mcp-server-harmony`.
 
 As a service (Streamable HTTP), to share one instance between Claude Code, Claude Desktop and
 the mobile app through a Cloudflare Tunnel with Cloudflare Access in front:
@@ -326,10 +337,10 @@ aioharmony. `test_assumptions.py` fails if this table and `assumptions.py` disag
 
 ## Roadmap
 
-- Validate on hardware ([HARDWARE_VALIDATION.md](HARDWARE_VALIDATION.md))
+- Validate on hardware ([HARDWARE_VALIDATION.md](https://github.com/SDNick484/mcp-server-harmony/blob/main/HARDWARE_VALIDATION.md))
 - Surface activity changes as MCP resource updates, once the Claude apps support subscriptions
 - Publish to the MCP registry
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+MIT. See [LICENSE](https://github.com/SDNick484/mcp-server-harmony/blob/main/LICENSE).

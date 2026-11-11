@@ -43,6 +43,39 @@ jobs:
       - run: mypy
       - run: pytest
 
+  # The built wheel, installed on its own and launched over stdio the way Claude Desktop launches it, on the
+  # three systems people run Claude Desktop on. The test job runs from a source checkout on Linux only, so
+  # this is the one place a packaging slip or a macOS/Windows difference would show before a release.
+  # No hub is needed: with an empty config the status tool still answers (with a hint).
+  wheel-smoke:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    defaults:
+      run:
+        shell: bash  # Git Bash on Windows, so one script serves all three
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.13"
+      - run: pip install build && python -m build --wheel
+      - name: Install the wheel in a clean venv
+        run: |
+          python -m venv "$RUNNER_TEMP/v"
+          if [ -d "$RUNNER_TEMP/v/Scripts" ]; then bin="$RUNNER_TEMP/v/Scripts"; else bin="$RUNNER_TEMP/v/bin"; fi
+          "$bin/python" -m pip install dist/*.whl
+          echo "BIN=$bin" >>"$GITHUB_ENV"
+      - name: First exchange over stdio, no hub configured
+        env:
+          HARMONY_CONFIG_DIR: ${{ runner.temp }}/empty-config
+        run: |
+          version=$(python -c 'import re, pathlib; print(re.search(r"__version__ = \"(.+)\"", pathlib.Path("src/harmony_mcp/__init__.py").read_text())[1])')
+          python scripts/smoke_stdio.py --expect-version "$version" --call harmony_get_status -- "$BIN/mcp-server-harmony"
+
   alpine:
     runs-on: ubuntu-latest
     timeout-minutes: 15

@@ -50,6 +50,10 @@ def ref(hub: HubClient, name: str) -> str:
     return f"{hub.name}/{name}"
 
 
+# Shared by the actions' refusal and get_status's hint, so a first run says the same thing either way.
+NO_HUBS = "No Harmony hub configured. Run `mcp-server-harmony check --host <ip>` once per hub, or set HARMONY_HOSTS."
+
+
 class HubRegistry:
     # A client may call a tool the moment it launches us (get_status at startup, `call`), while the hubs
     # are still connecting. The first call waits up to this long for each hub's first attempt to finish,
@@ -120,10 +124,7 @@ class HubRegistry:
     def candidates(self, hub: str | None) -> list[HubClient]:
         """The hubs a call may be about: the named one, or all of them."""
         if not self.hubs:
-            raise HarmonyError(
-                "No Harmony hub configured. Run `mcp-server-harmony check --host <ip>` once per hub, "
-                "or set HARMONY_HOSTS."
-            )
+            raise HarmonyError(NO_HUBS)
         if hub is None:
             return list(self.hubs)
         match = [h for h in self.hubs if h.answers_to(hub)]
