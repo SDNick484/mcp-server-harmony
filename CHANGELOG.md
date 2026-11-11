@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-10
+
+The v0.2.0 tag never reached PyPI (it pointed at a commit still versioned 0.1.0), so this release carries 0.2.0's changes too.
+
 ### Breaking Changes
 
 - **Tool Namespacing:** All MCP tools are now prefixed with `harmony_` (`harmony_get_status`, `harmony_list_activities`, `harmony_list_devices`, `harmony_list_commands`, `harmony_start_activity`, `harmony_power_off`, `harmony_send_command`) to avoid naming collisions in MCP clients when run alongside sibling smart home servers.
