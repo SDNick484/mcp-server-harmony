@@ -20,9 +20,11 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import math
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
 from aioharmony.const import ClientCallbackType, SendCommandDevice
@@ -46,7 +48,7 @@ from .limits import (
 )
 from .logsafe import mask_ip
 from .ratelimit import TokenBucket, refusal
-from .tasks import stop_task
+from .tasks import spawn_task, stop_task
 
 log = logging.getLogger(__name__)
 
@@ -67,6 +69,24 @@ class ActivityRef(TypedDict):
     name: str
 
 
+class SleepTimerInfo(TypedDict):
+    """A pending sleep timer. Lives in this server's memory only (see HubClient.set_sleep_timer)."""
+
+    fires_at: str  # UTC, ISO 8601
+    minutes_left: int  # rounded up, so "1" means under a minute; 0 while it is retrying past its time
+    # Null while it is waiting. Non-null once it fired but the hub couldn't take the power off yet
+    # (busy, unreachable, rate limited): why, and that it keeps trying for a bounded time.
+    retrying: str | None
+
+
+class SleepTimerEnd(TypedDict):
+    """How the last sleep timer ended. Nothing can tell the model when a timer fires, so this is where it looks."""
+
+    outcome: Literal["fired", "cancelled", "failed"]
+    detail: str
+    at: str  # UTC, ISO 8601
+
+
 class Status(TypedDict):
     hub: str
     host: str
@@ -77,6 +97,21 @@ class Status(TypedDict):
     # Non-null while the hub runs an activity's start or power-off sequence;
     # commands are refused until it clears.
     transition: str | None
+    sleep_timer: SleepTimerInfo | None
+    last_sleep_timer: SleepTimerEnd | None
+
+
+@dataclass
+class _SleepTimer:
+    """One hub's pending timer. ``due`` is on the event loop's monotonic clock; ``fires_at`` is only for display."""
+
+    due: float
+    fires_at: datetime
+    task: asyncio.Task[None] | None = None
+    # True from the moment it is due. The timer's own power off makes the hub report "off", and that must not
+    # read as "someone else turned it off" (which drops the timer), so the activity callbacks ignore it then.
+    firing: bool = False
+    retry_reason: str | None = None
 
 
 @dataclass(frozen=True)
@@ -122,6 +157,11 @@ class HubClient:
     # task that won't stop is abandoned here, with a warning naming it, and there's still time to close
     # the connection. The registry's timeout stays as the backstop.
     stop_timeout = 3.0
+    # Sleep timer: seconds per "minute" (tests shrink it so a 1-minute timer takes milliseconds), how long
+    # after it is due it keeps trying while the hub is busy or unreachable, and the gap between tries.
+    sleep_unit = 60.0
+    sleep_retry_window = 300.0
+    sleep_retry_delay = 15.0
 
     def __init__(
         self,
@@ -154,6 +194,10 @@ class HubClient:
         # Bumped by each _run_activity. A forced power off can overtake a start that is still waiting for its
         # sequence; when that start returns, the counter tells it a later run owns the state now.
         self._runs = 0
+        # The pending sleep timer and how the previous one ended. In memory on purpose: a TV that turns itself
+        # off after a restart, long after anyone remembers asking, is worse than a timer that is lost.
+        self._timer: _SleepTimer | None = None
+        self.sleep_last: SleepTimerEnd | None = None
 
     # --- lifecycle -----------------------------------------------------------
     @property
@@ -188,7 +232,9 @@ class HubClient:
         # another cancel to the task and goes on waiting, so HubRegistry's timeout couldn't bound it
         # either. And suppressing CancelledError around the await also swallowed the cancel that
         # timeout relies on. Both tasks at once, so two wedged ones cost one stop_timeout, not two.
+        timer, self._timer = self._timer, None  # shutdown ends it without a record: nobody can read one
         await asyncio.gather(
+            stop_task(timer.task if timer else None, self.stop_timeout, f"{self.name}'s sleep timer"),
             stop_task(self._resync_task, self.stop_timeout, f"{self.name}'s state refresh"),
             stop_task(self._task, self.stop_timeout, f"{self.name}'s connection"),
         )
@@ -334,6 +380,7 @@ class HubClient:
         self.catalog = Catalog.from_config(self._api.config)
         self.activity_id = self._api.current_activity[0]
         self.starting_id = None
+        self._drop_timer_if_off()
         log.info("%s: state refreshed after reconnect", self.name)
 
     def _on_disconnect(self, _ip: object) -> None:
@@ -345,6 +392,7 @@ class HubClient:
     def _on_activity(self, activity: tuple[int | None, str | None]) -> None:
         self.activity_id = activity[0]
         self.starting_id = None
+        self._drop_timer_if_off()
 
     def _on_config(self, config: dict[str, Any]) -> None:
         self.catalog = Catalog.from_config(config)
@@ -435,6 +483,7 @@ class HubClient:
         # returns, but don't depend on callback ordering for our own state.
         self.activity_id = activity_id
         self.starting_id = None
+        self._drop_timer_if_off()
         return Outcome(changed=True, sent=sent)
 
     async def send(self, command: Command, repeat: int = 1, hold_ms: int = 0, delay_ms: int | None = None) -> Outcome:
@@ -480,6 +529,107 @@ class HubClient:
             raise HarmonyError(f"{self.name} rejected {command.name} for {device}: {e.msg} (code {e.code})")
         return Outcome(changed=True, sent=sent)
 
+    # --- sleep timer ---------------------------------------------------------
+    # A model acts only when it is called, so "turn the TV off in 45 minutes" needs something that outlives the
+    # call: this server, which is long-lived and holds the hub connection. The timer is an asyncio task that
+    # sleeps, then runs the same power_off() as the tool, so the busy guard, the rate limit and dry run all
+    # apply unchanged. Switching activities keeps it (the person is still watching); the hub going off, by
+    # anyone, drops it.
+    def _end_timer(self, timer: _SleepTimer, outcome: Literal["fired", "cancelled", "failed"], detail: str) -> None:
+        if self._timer is timer:  # a replaced timer's task must not clear its successor
+            self._timer = None
+        self.sleep_last = {"outcome": outcome, "detail": detail, "at": datetime.now(UTC).isoformat(timespec="seconds")}
+        log.info("%s: sleep timer %s: %s", self.name, outcome, detail)
+
+    def _drop_timer_if_off(self) -> None:
+        """The hub went off while a timer waited: nothing is left to turn off, so the timer goes too."""
+        timer = self._timer
+        if timer is None or timer.firing or self.activity_id != POWER_OFF_ID:
+            return
+        if timer.task is not None:
+            timer.task.cancel()  # it is only sleeping here (firing is False), so a plain cancel is reliable
+        self._end_timer(timer, "cancelled", "The hub was powered off before the timer fired, so it was dropped.")
+
+    @property
+    def is_on(self) -> bool:
+        """On, or an activity is starting; powering off (or off) doesn't count."""
+        if self.starting_id is not None:
+            return self.starting_id != POWER_OFF_ID
+        return self.activity_id is not None and self.activity_id != POWER_OFF_ID
+
+    def has_sleep_timer(self) -> bool:
+        return self._timer is not None
+
+    async def set_sleep_timer(self, minutes: int) -> tuple[SleepTimerInfo, SleepTimerEnd | None]:
+        """Schedule this hub's power off in `minutes`, replacing a pending timer.
+
+        Returns the new timer and, when it replaced one, how that one was ended.
+        """
+        self._require()
+        if not self.is_on:
+            raise HarmonyError(f"{self.name} is off, so there is nothing to turn off later.")
+        replaced = await self.cancel_sleep_timer("Replaced by a new timer.")
+        loop = asyncio.get_running_loop()
+        seconds = minutes * self.sleep_unit
+        timer = _SleepTimer(due=loop.time() + seconds, fires_at=datetime.now(UTC) + timedelta(seconds=seconds))
+        self._timer = timer
+        timer.task = spawn_task(
+            self._run_sleep_timer(timer),
+            name=f"harmony-sleep-{self.name}",
+            on_error=lambda exc: self._end_timer(timer, "failed", f"The timer crashed: {exc!r}"),
+        )
+        return self._timer_info(timer), replaced
+
+    async def cancel_sleep_timer(self, why: str = "Cancelled.") -> SleepTimerEnd | None:
+        """Stop a pending timer; None when there was none."""
+        timer = self._timer
+        if timer is None:
+            return None
+        await stop_task(timer.task, self.stop_timeout, f"{self.name}'s sleep timer")
+        if self._timer is not timer:  # it finished (or was dropped) while we waited for it to stop
+            return None
+        self._end_timer(timer, "cancelled", why)
+        return self.sleep_last
+
+    async def _run_sleep_timer(self, timer: _SleepTimer) -> None:
+        loop = asyncio.get_running_loop()
+        await asyncio.sleep(max(0.0, timer.due - loop.time()))
+        timer.firing = True
+        deadline = loop.time() + self.sleep_retry_window
+        while True:
+            try:
+                outcome = await self.power_off()
+            except HarmonyError as exc:
+                # Busy mid-sequence, unreachable, rate limited, refused by the hub: all can clear in a
+                # moment, so keep trying for a bounded time and keep the last reason either way.
+                timer.retry_reason = str(exc)
+                if loop.time() + self.sleep_retry_delay > deadline:
+                    self._end_timer(
+                        timer,
+                        "failed",
+                        f"The TV was not turned off. Gave up retrying {self.sleep_retry_window / self.sleep_unit:g} "
+                        f"minutes after the timer was due; last reason: {exc}",
+                    )
+                    return
+                await asyncio.sleep(self.sleep_retry_delay)
+                continue
+            if outcome.dry_run:
+                self._end_timer(timer, "fired", "DRY RUN: the power off was reported, not sent.")
+            elif outcome.changed:
+                self._end_timer(timer, "fired", "The hub was powered off.")
+            else:
+                # Off already: someone turned it off while we were retrying (the callbacks ignore a firing timer).
+                self._end_timer(timer, "cancelled", "The hub was already off when the timer fired.")
+            return
+
+    def _timer_info(self, timer: _SleepTimer) -> SleepTimerInfo:
+        left = timer.due - asyncio.get_running_loop().time()
+        return {
+            "fires_at": timer.fires_at.isoformat(timespec="seconds"),
+            "minutes_left": max(0, math.ceil(left / self.sleep_unit)),
+            "retrying": timer.retry_reason if timer.firing else None,
+        }
+
     # --- reporting -----------------------------------------------------------
     def _name(self, activity_id: int | None) -> str:
         a = self.catalog.activity_by_id(activity_id)
@@ -512,4 +662,6 @@ class HubClient:
                 if self.starting_id == POWER_OFF_ID
                 else f"starting {self._name(self.starting_id)}"
             ),
+            "sleep_timer": self._timer_info(self._timer) if self._timer is not None else None,
+            "last_sleep_timer": self.sleep_last,
         }

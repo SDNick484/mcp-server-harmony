@@ -19,7 +19,9 @@ explain the reasoning behind non-obvious changes instead of only making them.
   re-reads state after a reconnect; `_connect_forever` restarts a crashed connection cycle with backoff;
   `ping()` is an active round trip (a full `refresh_info_from_hub`, so not for every request);
   `last_connected_at`/`reconnect_count` are diagnostics, not in `Status`; rate limits per hub; `stop()`
-  ends its tasks with `stop_task`
+  ends its tasks (the sleep timer's too) with `stop_task`. `Status` was kept stable on purpose; the one
+  addition is `sleep_timer`/`last_sleep_timer`, because only `get_status` can tell the model a timer fired.
+  Add to it only for a reason as strong.
 - `src/harmony_mcp/hubs.py`: `HubRegistry`, all the hubs, the rule for which one a call means,
   hub-qualified refs (`Den/Watch TV`), the first-call startup grace, bounded shutdown,
   `healthy_count`/`status_summary` (from `available`; they send nothing)
@@ -57,7 +59,8 @@ explain the reasoning behind non-obvious changes instead of only making them.
   fake hub over sockets), `test_catalog`, `test_config`, `test_client`, `test_tools` (in-process
   MCP `Client`), `test_multi_hub`, `test_safety`, `test_tooling`, `test_recorded` (replays
   `doctor --dump` captures), `test_assumptions`, `test_cli`, `test_stdio`, `test_remote`,
-  `test_logsafe`, `test_tasks`, `test_export`. Async tests use anyio's plugin.
+  `test_logsafe`, `test_tasks`, `test_export`,
+  `test_sleep_timer`. Async tests use anyio's plugin.
 
 ## Rules for changes
 
@@ -80,6 +83,12 @@ explain the reasoning behind non-obvious changes instead of only making them.
   H-FORCE-OFF is `hardware-contradicted` (2026-11-04): during a normal start the hub itself answered
   "Activity in progress" and refused the power off, so `force` only skips *our* guard; it does not make
   the hub interrupt a start. Don't describe it as doing more than that.
+- **Sleep timer** (`harmony_set_sleep_timer`, in `client.py`): one task per hub from `spawn_task`, held in
+  memory only (never persist it: a TV that switches off after a restart is worse than a lost timer). When
+  due it calls the normal `power_off()`, so the busy guard, rate limit and dry run apply; busy or
+  unreachable is retried for `sleep_retry_window`, then recorded as failed with the reason. The hub going
+  off drops it (`_drop_timer_if_off`), an activity switch does not, and the timer's own power off must not
+  drop itself (`firing`). Tests shrink `sleep_unit`, `sleep_retry_window` and `sleep_retry_delay`.
 - Raise `HarmonyError` (a `ToolError`) for anything the model or user can act on.
 - **Don't invent protocol details.** Anything not confirmed on hardware is an `Assumption`, cited
   as `# ASSUMPTION <id>` where code depends on it, in README's table and HARDWARE_VALIDATION.md.

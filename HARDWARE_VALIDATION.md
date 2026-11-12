@@ -324,6 +324,26 @@ compare:
 
 Confirms: **H-FIXIT**.
 
+## 11. Sleep timer
+
+No new assumption: the timer only calls the power off that step 8 already covers. This checks the
+timer itself on a real hub. Use Claude Code or Claude Desktop (or `serve --http`), since the server
+must stay running while the timer counts down; a `call` exits first and takes the timer with it.
+
+1. With one TV on, ask Claude: *"Turn the TV off in 2 minutes."* It should call
+   `harmony_set_sleep_timer` and say the timer lives in the server's memory.
+2. Ask for the status right away. That hub should show `sleep_timer` with `fires_at`, about 2
+   `minutes_left` and `retrying: null`; `last_sleep_timer` is null (or the previous timer's end).
+3. Switch to another activity on the same hub before it fires. `sleep_timer` should still be there.
+4. Watch the TV turn off at the two-minute mark. Then ask for the status: `sleep_timer` null,
+   `last_sleep_timer` `fired`, `power` off.
+5. Set a 10-minute timer, then ask for it to be cancelled (`minutes=0`): `last_sleep_timer` is `cancelled`
+   and the TV stays on. Set another, then turn the TV off from the physical remote: the timer is dropped.
+6. Optional, the busy retry: set a 1-minute timer and start an activity from the remote as it comes due.
+   Status should show `retrying: "... is busy ..."` and the TV should turn off once the sequence ends.
+
+Confirms nothing new, but record what the two-minute timer did here.
+
 ---
 
 ## Which step confirms what

@@ -11,6 +11,8 @@
 - `harmony_describe_activity` (read-only): the devices an activity involves, with expected power (on/off/unknown) and input, and which device gets each button group. The expected state comes from each activity's `fixit` in the hub's config (new assumption `H-FIXIT`, medium); without one it says `unknown`.
 - `mcp-server-harmony export`: per hub, the raw config (account identifiers removed; `--redact` masks addresses) and a Markdown worksheet for rebuilding the setup on another remote, both readable by the owner only. A record to rebuild from, not a backup.
 - `migrate_to_another_remote(target)` prompt: describes every activity and writes a rebuild checklist for the named remote.
+- `harmony_set_sleep_timer(minutes, hub=None)`: turns a hub's TV system off after 1-720 minutes (0 cancels), replacing a timer already set. It runs the normal power off, so the busy guard, rate limit and dry run apply, and retries for five minutes if the hub is busy or unreachable. The hub going off first drops it; switching activities keeps it. Held in the server's memory only (it outlives the chat under `serve --http`, not over stdio).
+- `harmony_get_status` gives each hub `sleep_timer` (when it fires, minutes left, or null) and `last_sleep_timer` (how the last one ended: fired, cancelled or failed, and why). Both are always present, null when empty.
 
 ### Fixed
 
