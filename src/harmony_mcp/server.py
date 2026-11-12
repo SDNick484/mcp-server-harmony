@@ -48,11 +48,11 @@ from typing_extensions import TypedDict
 
 from . import __version__
 from .catalog import Catalog, Command
-from .client import HarmonyError, HubClient, Outcome, Status
+from .client import HarmonyError, HubClient, Outcome, SleepTimerInfo, Status
 from .config import load_settings
 from .export import ActivityDescription, describe_activity
 from .hubs import ALL, NO_HUBS, HubRegistry, ref
-from .limits import MAX_DELAY_MS, MAX_HOLD_MS, MAX_REPEAT, MIN_DELAY_MS
+from .limits import MAX_DELAY_MS, MAX_HOLD_MS, MAX_REPEAT, MAX_SLEEP_MINUTES, MIN_DELAY_MS
 from .lookup import unknown_with_suggestions
 from .tools import ACT, ACT_IDEMPOTENT, READ_ONLY
 
@@ -160,6 +160,13 @@ class PowerOffResult(TypedDict):
     results: list[ActionResult]
 
 
+class SleepTimerResult(TypedDict):
+    hub: str
+    outcome: Literal["set", "cancelled"]
+    detail: str  # one sentence for the user, including where the timer lives
+    sleep_timer: SleepTimerInfo | None  # the pending timer; null after a cancel
+
+
 def _commands_view(catalog: Catalog, commands: tuple[Command, ...]) -> list[CommandInfo]:
     return [
         {"name": c.name, "label": c.label, "group": c.group, "device": catalog.device_name(c.device_id)}
@@ -182,6 +189,10 @@ async def harmony_get_status() -> HubsStatus:
 
     transition is non-null while an activity is starting or powering off; that hub's commands wait until it
     clears. dry_run true means this server reports writes instead of sending them.
+
+    sleep_timer is a pending harmony_set_sleep_timer (when it fires, minutes left) or null. last_sleep_timer says how
+    the previous one ended (fired, cancelled or failed, and why): nothing else tells you when a timer fires, so
+    check here after the time has passed.
     """
     r = await ready_hubs()
     status: HubsStatus = {"dry_run": r.settings.dry_run, "hubs": [h.snapshot() for h in r.hubs]}
@@ -346,6 +357,50 @@ async def harmony_describe_activity(
     """
     h, a = (await ready_hubs()).activity(activity, hub)
     return describe_activity(h.name, ref(h, a.name), h.catalog, a)
+
+
+@mcp.tool(title="Set a sleep timer", annotations=_ACT)
+async def harmony_set_sleep_timer(
+    minutes: Annotated[
+        int,
+        Field(ge=0, le=MAX_SLEEP_MINUTES, description=f"Minutes from now, 1-{MAX_SLEEP_MINUTES}. 0 cancels the timer."),
+    ],
+    hub: Annotated[
+        str | None,
+        Field(description="Hub name from harmony_get_status. Omit when only one hub is on."),
+    ] = None,
+) -> SleepTimerResult:
+    """Turn a hub's TV system off in `minutes` minutes (the same power-off as harmony_power_off); 0 cancels.
+
+    "Turn the bedroom TV off in 45 minutes" is one call. A new timer replaces the one already set on that hub.
+    With no hub and several hubs on, this asks which. A hub that is off is refused.
+
+    The timer is held in this server's memory, not on the hub, and is not saved: under `serve --http` it outlives
+    the chat, but over stdio the server exits when the MCP client closes, and the timer goes with it. It is
+    dropped if the hub is powered off first (by anyone); switching activities keeps it. If the hub is busy or
+    unreachable when it fires, it retries for a few minutes, then gives up. Nothing notifies you when it fires:
+    check harmony_get_status (sleep_timer while pending, last_sleep_timer afterwards).
+    """
+    h = (await ready_hubs()).sleep_target(hub, cancel=minutes == 0)
+    if minutes == 0:
+        if await h.cancel_sleep_timer() is None:
+            raise HarmonyError(f"No sleep timer is set on {h.name}.")
+        return {
+            "hub": h.name,
+            "outcome": "cancelled",
+            "detail": f"Cancelled the sleep timer on {h.name}.",
+            "sleep_timer": None,
+        }
+    timer, replaced = await h.set_sleep_timer(minutes)
+    detail = (
+        f"{h.name} will be turned off in {minutes} minute{'s' if minutes != 1 else ''} (at {timer['fires_at']} UTC)."
+        + (" This replaced the timer that was already set." if replaced else "")
+        + " The timer is held in this server's memory only: under `serve --http` it outlives the chat, but over "
+        "stdio it is lost when the MCP client closes the server. Check harmony_get_status afterwards."
+    )
+    if h.dry_run:
+        detail += " DRY RUN: when it fires the power off will be reported, not sent."
+    return {"hub": h.name, "outcome": "set", "detail": detail, "sleep_timer": timer}
 
 
 # --- resources: the static catalog, for clients that attach context ----------------------

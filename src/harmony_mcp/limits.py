@@ -23,3 +23,6 @@ MAX_REPEAT = 10
 MAX_HOLD_MS = 3000
 MIN_DELAY_MS, MAX_DELAY_MS = 100, 2000
 MAX_CALL_SECONDS = 15.0  # repeat * (hold + delay) for one send_command
+# Sleep timer: the longest one `harmony_set_sleep_timer` accepts. Twelve hours covers "turn it off when I'm
+# asleep" and keeps a forgotten timer from firing days later; the timer is only in memory anyway.
+MAX_SLEEP_MINUTES = 12 * 60

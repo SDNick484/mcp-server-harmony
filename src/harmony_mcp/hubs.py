@@ -258,3 +258,30 @@ class HubRegistry:
                 )
             return on
         return [h for h in pool if h in on or not h.available]
+
+    def sleep_target(self, hub: str | None, *, cancel: bool = False) -> HubClient:
+        """Which hub a sleep timer call is about. Never guessed, like power_off.
+
+        Setting: a named hub, else the one hub that is on (two on is ambiguous: different TVs). A hub that
+        is off is refused later, by the hub itself, with its own wording.
+        Cancelling: a named hub, else the one hub that has a timer. That is looser than "the one hub that is
+        on" on purpose: cancelling can never turn off the wrong room, and a timer only exists on a hub that is on.
+        """
+        if hub is not None:
+            return self.candidates(hub)[0]
+        pool = self.candidates(None)
+        if cancel:
+            with_timer = [h for h in pool if h.has_sleep_timer()]
+            if len(with_timer) > 1:
+                raise HarmonyError(
+                    f"Sleep timers are set on {_list([h.name for h in with_timer])}; pass hub to choose."
+                )
+            if with_timer:
+                return with_timer[0]
+            raise HarmonyError("No sleep timer is set on any hub.")
+        on = [h for h in pool if h.is_on]
+        if len(on) == 1:
+            return on[0]
+        if on:
+            raise HarmonyError(f"Several hubs are on ({_list([h.name for h in on])}); pass hub to choose.")
+        raise HarmonyError("No hub is on, so there is nothing to turn off later.")

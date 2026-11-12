@@ -27,6 +27,7 @@ TOOL_NAMES = {
     "harmony_power_off",
     "harmony_send_command",
     "harmony_describe_activity",
+    "harmony_set_sleep_timer",
 }
 
 
@@ -116,7 +117,17 @@ async def test_send_command_schema(mcp_client):
 async def test_get_status_publishes_output_schema(mcp_client):
     schema = (await tools(mcp_client))["harmony_get_status"].output_schema
     hub = schema["$defs"]["Status"]
-    assert set(hub["required"]) == {"hub", "host", "reachable", "firmware", "power", "current_activity", "transition"}
+    assert set(hub["required"]) == {
+        "hub",
+        "host",
+        "reachable",
+        "firmware",
+        "power",
+        "current_activity",
+        "transition",
+        "sleep_timer",
+        "last_sleep_timer",
+    }
 
 
 # --- tools/call --------------------------------------------------------------
@@ -139,6 +150,8 @@ async def test_get_status(mcp_client):
                 "power": "off",
                 "current_activity": None,
                 "transition": None,
+                "sleep_timer": None,
+                "last_sleep_timer": None,
             }
         ],
     }

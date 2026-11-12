@@ -53,6 +53,24 @@ take an optional `hub`, and the model only needs it when a name is ambiguous:
 The server never guesses between hubs: each one is a different TV, and a guess turns off the
 wrong room.
 
+### Sleep timer
+
+"Turn the bedroom TV off in 45 minutes" is `harmony_set_sleep_timer(minutes=45)`. A model only acts when
+it is called, so the server, which is long-lived and holds the hub connection, keeps the timer.
+
+- It runs the same power off as `harmony_power_off`, so the busy guard, the rate limit and dry run apply.
+  If the hub is mid-sequence or unreachable when it fires, it retries every 15 s for 5 minutes, then
+  gives up and keeps the reason.
+- With no `hub`, exactly one hub must be on (the `power_off` rule). A hub that is off is refused.
+  `minutes=0` cancels (with no `hub`, the one hub that has a timer). A new timer replaces the old one.
+- The hub being powered off before it fires, by anyone, drops the timer. Switching activities keeps it.
+- Nothing can notify the model when it fires, so `harmony_get_status` shows each hub's `sleep_timer`
+  (`fires_at`, `minutes_left`, `retrying`) while pending and `last_sleep_timer` (fired, cancelled or
+  failed, and why) afterwards.
+- **It lives in this server's memory only, and is not saved.** Under `serve --http` it outlives the chat;
+  over stdio the server exits when the MCP client closes, and the timer goes with it. A TV that turns
+  itself off after a restart, long after anyone remembers asking, is worse than a lost timer.
+
 ## Install
 
 ```sh
@@ -213,6 +231,7 @@ startup and by `doctor`.
 | `harmony_power_off`       | Run a hub's power-off (or `hub="all"`); `unchanged` if it's already off; `force` sends it anyway |
 | `harmony_send_command`    | Press a command 1-10 times (`repeat`), optionally held (`hold_ms`) or spaced (`delay_ms`)      |
 | `harmony_describe_activity` | Read-only: the devices an activity involves with expected power (on/off/unknown) and input, and which device gets each button group |
+| `harmony_set_sleep_timer` | Turn a hub's TV system off in 1-720 minutes (`minutes`; 0 cancels); a new one replaces the old; see [Sleep timer](#sleep-timer) |
 
 Every tool except `harmony_get_status` takes an optional `hub`. Actions return
 `{hub, outcome: done | unchanged | dry_run | error, detail, sent}`, where `sent` lists the frames
@@ -340,6 +359,7 @@ What the tests cover:
 | `test_multi_hub.py`   | Several hubs: ambiguity, refs, an offline hub, partial failures                                  |
 | `test_tools.py`       | The MCP contract the model sees (schemas, annotations, structured results)                      |
 | `test_safety.py`      | Dry run, rate limits, caps, config validation, shutdown                                          |
+| `test_sleep_timer.py` | The sleep timer: firing, replace, cancel, retries, dropping, shutdown, several hubs              |
 | `test_tooling.py`     | `doctor`, `discover`, `call`, `simulate`, log redaction                                           |
 | `test_recorded.py`    | Replays configs captured from real hubs (`doctor --dump`)                                        |
 | `test_assumptions.py` | Every assumption appears here and in HARDWARE_VALIDATION.md                                     |
