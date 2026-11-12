@@ -238,6 +238,20 @@ async def _cmd_simulate(args: argparse.Namespace, ready: asyncio.Event | None = 
 
 
 async def _cmd_call(args: argparse.Namespace) -> int:
+    from . import server
+
+    # One-shot: read the activity history but never add to it, or every `call` appends a recording_started
+    # per hub and buries real changes (history.py). Restored afterwards so an in-process caller (the tests)
+    # isn't left read-only.
+    prior = server.record_history
+    server.record_history = False
+    try:
+        return await _run_call(args)
+    finally:
+        server.record_history = prior
+
+
+async def _run_call(args: argparse.Namespace) -> int:
     from mcp import Client
 
     from .server import mcp

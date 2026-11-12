@@ -68,6 +68,10 @@ from .tools import ACT, ACT_IDEMPOTENT, READ_ONLY
 log = logging.getLogger(__name__)
 
 _hubs: HubRegistry | None = None
+# `serve` records activity history. A one-shot `call` sets this False before it starts the server in
+# process: it only reads the history file (history.py explains why). A module flag, not a tool argument:
+# the model must never be able to switch recording off.
+record_history = True
 
 
 def hubs() -> HubRegistry:
@@ -87,6 +91,9 @@ async def lifespan(_server: MCPServer) -> AsyncIterator[None]:
     """Open every hub connection once at startup; close them at shutdown."""
     global _hubs
     _hubs = HubRegistry(load_settings())
+    # Before start(): that is where the first state read would be recorded. The file was already loaded by the
+    # constructor, so a read-only history still has what the real server wrote.
+    _hubs.history.read_only = not record_history
     await _hubs.start()
     try:
         yield
@@ -556,6 +563,8 @@ async def harmony_get_history(
         "expired": expired,
         "events": events,
     }
+    if r.history.read_only and r.history.enabled:
+        page["hint"] = "This is a one-shot `call`: it reads history.jsonl but records nothing."
     if not r.history.enabled:
         page["hint"] = 'History is turned off (HARMONY_HISTORY or "history" in config.json), so nothing is recorded.'
     return page

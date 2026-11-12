@@ -26,6 +26,13 @@ owner only, and can be turned off (``HARMONY_HISTORY=off`` or ``"history": false
 is a household's viewing habits on its own disk, so records hold hub and activity *names* only, never an
 address. A write failure is logged once and never breaks a tool call or the connection.
 
+One-shot ``call`` runs are read-only (``History(read_only=True)``): they load the file, so ``call get_history``
+shows what a server recorded, but they never record. A ``call`` builds its own hub registry, and without this
+every run would append a ``recording_started`` per hub, so a few ``call get_status`` would bury the real
+changes under markers. A long-running server already sees whatever a ``call`` changes (the hub pushes it) and
+records it as ``elsewhere``; having ``call`` record it too would put the same change in the file twice. The
+cost is that a ``call`` made while no server runs leaves no record; that is accepted.
+
 The clock is injected so tests don't sleep.
 """
 
@@ -94,8 +101,10 @@ class History:
         clock: Callable[[], datetime] = utcnow,
         max_events: int = HISTORY_MAX_EVENTS,
         file_slack: int = HISTORY_FILE_SLACK,
+        read_only: bool = False,
     ) -> None:
         self.enabled = enabled
+        self.read_only = read_only  # loads the file, records and writes nothing (see the module docstring)
         self.path = path if enabled else None
         self._clock = clock
         self.max_events = max_events
@@ -114,7 +123,7 @@ class History:
     # --- recording ----------------------------------------------------------
     def baseline(self, hub: str, state: str | None) -> None:
         """The first state read for this hub since the server started: a marker, not a change."""
-        if not self.enabled:
+        if not self.enabled or self.read_only:
             return
         hub = safe_name(hub)
         now = self._clock()
@@ -140,7 +149,7 @@ class History:
         The caller decides *what* the state is; this decides whether it is news. That is the one place
         duplicates are dropped, so the pushed callback and a start's own bookkeeping can both report it.
         """
-        if not self.enabled:
+        if not self.enabled or self.read_only:
             return False
         hub = safe_name(hub)
         now = self._clock()
@@ -203,7 +212,10 @@ class History:
     def _load(self) -> None:
         assert self.path is not None
         try:
-            text = self.path.read_text(encoding="utf-8")
+            # Another process may be mid-append (a running server while `call` reads), so the last line can be
+            # cut anywhere, even inside a multi-byte character. Decode leniently: strict decoding would raise
+            # UnicodeDecodeError (a ValueError, not an OSError) and break the whole read, not just that line.
+            text = self.path.read_bytes().decode("utf-8", errors="replace")
         except FileNotFoundError:
             return
         except OSError as exc:

@@ -20,6 +20,7 @@
 
 - `doctor --dump` could keep the Logitech account's e-mail address: a real config's `global.timeStampHash` embeds it mid-string, where neither the key list nor log redaction caught it. The scrub now drops that key and any value with an address inside it.
 - `harmony_send_command` could not tell the `-` and `.` buttons apart (both normalised to nothing, so the first one won). Exact names are now matched before the normalised match.
+- `mcp-server-harmony call` no longer adds `recording_started` markers to the activity history (every run appended one per hub). `call` now only reads `history.jsonl`, so `call get_history` still shows what a server recorded; `serve` records as before. A history file read while a server is mid-append, even cut inside a multi-byte character, no longer fails to load.
 
 ### Documentation
 
