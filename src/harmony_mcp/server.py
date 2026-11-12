@@ -52,6 +52,7 @@ from .channels import SEPARATORS, looks_like_number, number_problem
 from .client import HarmonyError, HubClient, Outcome, SleepTimerInfo, Status
 from .config import load_settings
 from .export import ActivityDescription, describe_activity
+from .history import HistoryEvent
 from .hubs import ALL, NO_HUBS, HubRegistry, ref
 from .limits import (
     MAX_CHANNEL_ARG,
@@ -173,6 +174,17 @@ class SleepTimerResult(TypedDict):
     outcome: Literal["set", "cancelled"]
     detail: str  # one sentence for the user, including where the timer lives
     sleep_timer: SleepTimerInfo | None  # the pending timer; null after a cancel
+
+
+class HistoryPage(TypedDict):
+    enabled: bool  # false: history is turned off, nothing is recorded
+    persisted: bool  # true: events are also written to history.jsonl and survive a restart
+    session_started: str  # when this server process began recording (UTC)
+    recording_since: str | None  # the oldest record still kept; nothing earlier is known
+    last_seq: int  # pass as after_seq next time to get only what's new
+    expired: bool  # after_seq no longer lines up (older records were dropped, or the counter restarted)
+    events: list[HistoryEvent]
+    hint: NotRequired[str]
 
 
 def _commands_view(catalog: Catalog, commands: tuple[Command, ...]) -> list[CommandInfo]:
@@ -511,6 +523,42 @@ async def harmony_tune_channel(
     named = f" ({favorite_name})" if favorite_name else ""
     done = f"tune {h.name} to channel {number}{named} by pressing {', '.join(pressed)}"
     return _result(h, outcome, done, "")
+
+
+@mcp.tool(title="Get activity history", annotations=_READ)
+async def harmony_get_history(
+    hub: Hub = None,
+    limit: Annotated[int, Field(ge=1, le=100, description="Most events to return, 1-100.")] = 20,
+    after_seq: Annotated[
+        int | None, Field(ge=0, description="Only events newer than this seq (from a previous call's last_seq).")
+    ] = None,
+) -> HistoryPage:
+    """What each hub's activity changed from and to, and when (newest first, or oldest first with after_seq).
+
+    Answers "what was on at 9 last night?", "how long was the office TV on?" and "was it turned on from the
+    remote?". Each change has from_activity and to_activity (null means everything off), previous_lasted_seconds
+    (how long the previous state lasted), and source: 'this_server' for a start or power off this server sent,
+    'elsewhere' for anything else (the physical remote, the Harmony app, Home Assistant): the hub can't say which.
+    A recording_started event is where this server began watching a hub, not a change. Nothing is recorded while
+    the server isn't running, so a time before recording_since, or between one session's last event and the next
+    recording_started, is "not recorded", not "nothing happened". noticed_late means the change was found after
+    a reconnect, so `at` is when it was noticed, not when it happened.
+    """
+    r = await ready_hubs()
+    name = r.candidates(hub)[0].name if hub is not None else None  # validates hub; events are filed by name
+    events, expired = r.history.page(name, after_seq, limit)
+    page: HistoryPage = {
+        "enabled": r.history.enabled,
+        "persisted": r.history.persisting,
+        "session_started": r.history.session_started,
+        "recording_since": r.history.recording_since,
+        "last_seq": r.history.last_seq,
+        "expired": expired,
+        "events": events,
+    }
+    if not r.history.enabled:
+        page["hint"] = 'History is turned off (HARMONY_HISTORY or "history" in config.json), so nothing is recorded.'
+    return page
 
 
 # --- resources: the static catalog, for clients that attach context ----------------------

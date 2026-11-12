@@ -202,6 +202,27 @@ ASSUMPTIONS: tuple[Assumption, ...] = (
         "firmware; firmware 4.15.600 is unchecked",
         "medium",
     ),
+    Assumption(
+        "H-ACTIVITY-PUSH",
+        "When the running activity changes for any reason, including a start from the physical remote or the "
+        "Harmony app, the hub pushes it over the websocket and aioharmony calls new_activity(id, name) without "
+        "us asking. The history's 'elsewhere' records rest on this.",
+        "aioharmony _notification_callback (stateDigest notify); the fake hub implements it",
+        "medium",
+        status="hardware-verified",
+        note=_HW_2026_11_04 + ": activities were started from the Office Hub's and the Bedroom Hub's physical "
+        "remotes (Office Xbox, then PS5; SHIELD TV) and get_status, which only reads the state we cache, showed "
+        "them with no call from us to the hub, so they arrived as pushes. Starts only: a power off from the "
+        "remote or app is H-OFF-PUSH. The frames and their timing were not captured (no -v log), so how soon "
+        "after the change the push arrives, which `at` depends on, is unmeasured.",
+    ),
+    Assumption(
+        "H-OFF-PUSH",
+        "A power off made from the remote or the Harmony app is pushed the same way, as new_activity with "
+        "activity id -1, so history records it as a change to off.",
+        "none: inferred from -1 being the PowerOff activity (H-POWEROFF) and H-ACTIVITY-PUSH",
+        "low",
+    ),
 )
 
 # by_id, not a dict comprehension: a repeated id fails at import instead of silently dropping an entry.

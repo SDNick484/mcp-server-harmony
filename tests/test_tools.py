@@ -29,6 +29,7 @@ TOOL_NAMES = {
     "harmony_describe_activity",
     "harmony_set_sleep_timer",
     "harmony_tune_channel",
+    "harmony_get_history",
 }
 
 
