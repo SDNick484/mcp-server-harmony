@@ -42,7 +42,9 @@ explain the reasoning behind non-obvious changes instead of only making them.
   change of `HubClient.activity_id` goes through `HubClient._set_activity`, the one place it is recorded, so
   the pushed callback and `_run_activity` can't record it twice; `_own_target` marks a change as
   `this_server`. A baseline (first read after startup) is `recording_started`, not a change. Names only, never
-  an address; a write failure is logged once and never breaks anything
+  an address; a write failure is logged once and never breaks anything. `call` is read-only
+  (`History.read_only`, set by `cli._cmd_call` through `server.record_history`): it loads the file but records nothing,
+  so one-shot runs add no `recording_started` noise; a loader must tolerate a line another process is still writing
 - `src/harmony_mcp/limits.py`: this server's rate-limit numbers and per-call caps (the mechanism,
   `TokenBucket` and `refusal`, is shared `ratelimit.py`)
 - **Shared with the siblings; the source of truth is mcp-server-shared.** `src/harmony_mcp/remote.py`,

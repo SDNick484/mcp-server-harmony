@@ -323,6 +323,13 @@ with that state, so a gap reads as "not recorded" and not "nothing happened". Ov
 only runs while the MCP client does, so those gaps are normal. `previous_lasted_at_least` is true when
 the previous state began before recording did, so its duration is a minimum.
 
+`mcp-server-harmony call` only reads the history: `call get_history` shows what a server recorded,
+but a `call` never adds to the file, not even the `recording_started` marker (otherwise a few
+`call get_status` runs would fill it with markers). `serve` (stdio and `--http`) records as above. If a
+server is running, a change a `call` makes is pushed to it by the hub and recorded there as `elsewhere`,
+so it is not written twice. A `call` made while no server runs leaves no record. Because a server may be
+appending while a `call` reads, a half-written last line is skipped, never an error.
+
 ## Safety design
 
 - **The hub's own config is the allow-list.** Activity, device and command names are resolved

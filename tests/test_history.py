@@ -412,3 +412,64 @@ async def test_the_tool_says_when_history_is_off(two_hubs, factory, monkeypatch,
         await wait_until(lambda: all(h.available for h in server.hubs().hubs))
         page = await get_history(c)
     assert page["enabled"] is False and page["events"] == [] and "turned off" in page["hint"]
+
+
+# --- one-shot `call` is read-only ----------------------------------------------------------
+def test_a_read_only_history_loads_the_file_but_records_nothing(tmp_path, clock):
+    path = tmp_path / HISTORY_FILE
+    server_side = History(path, clock=clock)
+    server_side.baseline("Den", None)
+    server_side.change("Den", "Watch TV", "this_server")
+    before = path.read_bytes()
+
+    reader = History(path, clock=clock, read_only=True)
+    reader.baseline("Den", "Watch TV")  # what a `call`'s first state read does
+    reader.baseline("Living Room", None)
+    reader.change("Den", None, "elsewhere")
+
+    assert [e["kind"] for e in reader._events] == ["recording_started", "change"]  # only what was on disk
+    assert reader.last_seq == 2
+    assert path.read_bytes() == before
+
+
+def test_a_torn_last_line_never_breaks_a_reader(tmp_path, clock):
+    """A running server may be mid-append while `call` reads: even a cut inside a multi-byte character."""
+    path = tmp_path / HISTORY_FILE
+    History(path, clock=clock).baseline("Den", "Watch TV")
+    whole = json.dumps(
+        {"seq": 2, "at": "x", "hub": "Den", "kind": "change", "to_activity": "Café"}, ensure_ascii=False
+    ).encode()
+    cut = whole.index("é".encode()) + 1  # half of the two-byte é
+    with path.open("ab") as f:
+        f.write(b"\n" + whole[:cut])  # no trailing newline: still being written
+    reader = History(path, clock=clock, read_only=True)
+    assert [e["seq"] for e in reader._events] == [1]
+
+
+async def test_call_leaves_no_marker_and_get_history_returns_what_a_server_recorded(
+    two_hubs, factory, monkeypatch, capsys, clock
+):
+    import argparse
+
+    from harmony_mcp import cli
+
+    path = two_hubs / HISTORY_FILE
+    recorder = History(path, clock=clock)  # what a running `serve` wrote earlier
+    recorder.baseline("Den", None)
+    clock.advance(minutes=5)
+    recorder.change("Den", "Watch TV", "elsewhere")
+    before = path.read_bytes()
+    monkeypatch.setattr(server, "HubRegistry", lambda s: HubRegistry(s, api_factory=factory))
+
+    for _ in range(2):
+        assert await cli._cmd_call(argparse.Namespace(tool="get_status", args=[])) == 0
+    capsys.readouterr()  # drop the status output; keep only get_history's
+    assert await cli._cmd_call(argparse.Namespace(tool="get_history", args=[])) == 0
+    page = json.loads(capsys.readouterr().out)
+
+    assert path.read_bytes() == before  # no recording_started per hub, per call
+    assert [(e["kind"], e["to_activity"], e["source"]) for e in page["events"]] == [
+        ("change", "Watch TV", "elsewhere"),
+        ("recording_started", None, None),
+    ]
+    assert server.record_history is True  # restored, so serve in the same process still records
