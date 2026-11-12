@@ -176,6 +176,19 @@ ASSUMPTIONS: tuple[Assumption, ...] = (
         "none: our timeout, picked to cover slow TVs",
         "low",
     ),
+    Assumption(
+        "H-FIXIT",
+        "Each activity in the config has a fixit object keyed by device id. Each entry has id, Power 'On' or "
+        "'Off' (absent for a device powered by hand, which has isManualPower true instead), an optional Input "
+        "(sometimes empty), and optional isRelativePower, isRelativeInput and isAlwaysOn flags. Devices the "
+        "activity leaves off are listed with Power 'Off'.",
+        "aioharmony never reads it. Published hub config dumps show it in this shape: vekkt0r/harmenubar "
+        "unit/harmony.json, jfkriz/alexa-harmony-device-control controller.json, rkokkelk/com.jreenen.homeyharmonyhub "
+        "example_json/activity.json; and the Fixit class of digitaldan/harmony-client (the library openHAB's "
+        "Harmony binding uses) maps id, Power, Input, isAlwaysOn and isRelativePower. Those dumps are from older "
+        "firmware; firmware 4.15.600 is unchecked",
+        "medium",
+    ),
 )
 
 # by_id, not a dict comprehension: a repeated id fails at import instead of silently dropping an entry.

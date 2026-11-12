@@ -21,6 +21,7 @@ from __future__ import annotations
 import asyncio
 import json
 import platform
+import re
 import time
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
@@ -38,8 +39,14 @@ from .config import HubSettings, Settings
 from .logsafe import redact
 from .registry import doctor_summary
 
-# Keys whose values identify your Logitech account; dropped from dumps.
-_PRIVATE_KEYS = ("email", "account", "token", "password", "user", "username")
+# Keys whose values identify your Logitech account; dropped from dumps (and from `export`).
+# "timestamphash": a real config's global.timeStampHash is an opaque string with the account's
+# e-mail address embedded in the middle of it (seen in a published dump), where neither a key
+# match nor logsafe's e-mail pattern (which wants the address to stand alone) would catch it.
+# "household": content.householdUserProfileUri, already caught by "user", named for clarity.
+_PRIVATE_KEYS = ("email", "account", "token", "password", "user", "username", "timestamphash", "household")
+# Anything shaped like an address *inside* a longer string, for values under keys we don't know about.
+_EMBEDDED_EMAIL = re.compile(r"[A-Za-z0-9._%+-]@[A-Za-z0-9-]+\.[A-Za-z]{2,}")
 
 
 @dataclass
@@ -90,11 +97,17 @@ def versions() -> dict[str, str]:
 
 
 def scrub(value: Any) -> Any:
-    """Drop account-identifying keys (recursively) before anything is written to disk."""
+    """Drop account-identifying keys (recursively) before anything is written to disk.
+
+    Also any string value with an e-mail address anywhere in it, whatever its key: the
+    key list can only name what we have seen, and a missed address is the costly mistake.
+    """
     if isinstance(value, dict):
         return {k: ("<redacted>" if any(p in k.lower() for p in _PRIVATE_KEYS) else scrub(v)) for k, v in value.items()}
     if isinstance(value, list):
         return [scrub(v) for v in value]
+    if isinstance(value, str) and _EMBEDDED_EMAIL.search(value):
+        return "<redacted>"
     return value
 
 

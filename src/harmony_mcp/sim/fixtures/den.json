@@ -1,10 +1,16 @@
 {
- "_comment": "Hand-built in the shape of HarmonyAPI.config (string ids, JSON-string actions). NOT recorded from a hub; see assumptions H-CONFIG-SHAPE. Replace or extend with `mcp-server-harmony doctor --dump`.",
+ "_comment": "Hand-built in the shape of HarmonyAPI.config (string ids, JSON-string actions). NOT recorded from a hub; see assumptions H-CONFIG-SHAPE. Replace or extend with `mcp-server-harmony doctor --dump`. Its Listen to Music has no fixit on purpose: the expected state is reported as unknown.",
  "activity": [
   {
    "id": "-1",
    "label": "PowerOff",
-   "controlGroup": []
+   "controlGroup": [],
+   "fixit": {
+    "72000001": {
+     "id": "72000001",
+     "Power": "Off"
+    }
+   }
   },
   {
    "id": "39000001",
@@ -20,7 +26,14 @@
       }
      ]
     }
-   ]
+   ],
+   "fixit": {
+    "72000001": {
+     "id": "72000001",
+     "Power": "On",
+     "Input": "HDMI 1"
+    }
+   }
   },
   {
    "id": "39000002",

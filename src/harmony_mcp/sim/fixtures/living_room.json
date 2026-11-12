@@ -1,10 +1,33 @@
 {
- "_comment": "Hand-built in the shape of HarmonyAPI.config (string ids, JSON-string actions). NOT recorded from a hub; see assumptions H-CONFIG-SHAPE. Replace or extend with `mcp-server-harmony doctor --dump`.",
+ "_comment": "Hand-built in the shape of HarmonyAPI.config (string ids, JSON-string actions). NOT recorded from a hub; see assumptions H-CONFIG-SHAPE and H-FIXIT (each activity's fixit, shaped like published dumps). global and content carry made-up account identifiers so tests can check that doctor --dump and export remove them. Replace or extend with `mcp-server-harmony doctor --dump`.",
+ "global": {
+  "locale": "en-US",
+  "timeStampHash": "5d1f0c2e-hub-1/9a8b7c6d-Harmony+Hub-USowner@example.invalidUSMS-0a1b2c3d;e4f5"
+ },
+ "content": {
+  "householdUserProfileUri": "svcs.myharmony.com/res//household/123456-ownerhouseholdid",
+  "contentDeviceHost": "https://content.dhg.myharmony.com/1.0/Device;{deviceProfileUri}"
+ },
  "activity": [
   {
    "id": "-1",
    "label": "PowerOff",
-   "controlGroup": []
+   "controlGroup": [],
+   "fixit": {
+    "71000001": {
+     "id": "71000001",
+     "Power": "Off"
+    },
+    "71000002": {
+     "id": "71000002",
+     "Power": "Off"
+    },
+    "71000003": {
+     "id": "71000003",
+     "Power": "Off",
+     "isRelativePower": true
+    }
+   }
   },
   {
    "id": "38000001",
@@ -40,7 +63,24 @@
       }
      ]
     }
-   ]
+   ],
+   "fixit": {
+    "71000001": {
+     "id": "71000001",
+     "Power": "On",
+     "Input": "STRM BOX"
+    },
+    "71000002": {
+     "id": "71000002",
+     "Power": "On"
+    },
+    "71000003": {
+     "id": "71000003",
+     "Power": "On",
+     "Input": "HDMI 1",
+     "isRelativePower": true
+    }
+   }
   },
   {
    "id": "38000002",
@@ -56,7 +96,23 @@
       }
      ]
     }
-   ]
+   ],
+   "fixit": {
+    "71000001": {
+     "id": "71000001",
+     "Power": "On",
+     "Input": "NET"
+    },
+    "71000002": {
+     "id": "71000002",
+     "Power": "Off"
+    },
+    "71000003": {
+     "id": "71000003",
+     "Power": "Off",
+     "isRelativePower": true
+    }
+   }
   }
  ],
  "device": [

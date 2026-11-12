@@ -21,6 +21,11 @@ One server can drive several hubs (one per TV). Every tool takes an optional
 more than one is an error that lists them (see hubs.py). Names may also be
 hub-qualified, "Den/Watch TV", which is what the list tools return as ``ref``.
 
+Why there is no tool that returns a hub's raw config: it is tens of kilobytes the
+model has no use for. harmony_describe_activity gives the useful part of it
+(what an activity turns on, which input, where each button goes), and
+`mcp-server-harmony export` writes the whole thing to a file.
+
 Why there is no separate list_hubs tool: get_status already lists every hub
 with its state, and two tools that both "list hubs" split the model's choice
 for no gain.
@@ -45,6 +50,7 @@ from . import __version__
 from .catalog import Catalog, Command
 from .client import HarmonyError, HubClient, Outcome, Status
 from .config import load_settings
+from .export import ActivityDescription, describe_activity
 from .hubs import ALL, NO_HUBS, HubRegistry, ref
 from .limits import MAX_DELAY_MS, MAX_HOLD_MS, MAX_REPEAT, MIN_DELAY_MS
 from .lookup import unknown_with_suggestions
@@ -325,6 +331,23 @@ async def harmony_send_command(
     return _result(h, outcome, f"send {cmd.name} x{repeat} to {target} on {h.name}", "")
 
 
+@mcp.tool(title="Describe an activity", annotations=_READ)
+async def harmony_describe_activity(
+    activity: Annotated[
+        str, Field(description="Activity name or ref from harmony_list_activities, e.g. 'Den/Watch TV'.")
+    ],
+    hub: Hub = None,
+) -> ActivityDescription:
+    """What an activity sets up, read from the hub's config; sends nothing.
+
+    Lists each device it involves with its expected power (on, off or unknown) and input, and which device
+    each group of buttons goes to (e.g. Volume to the receiver). expected_state 'unknown' means the hub's
+    config doesn't say: report it as unknown, don't guess. Useful to rebuild an activity on another remote.
+    """
+    h, a = (await ready_hubs()).activity(activity, hub)
+    return describe_activity(h.name, ref(h, a.name), h.catalog, a)
+
+
 # --- resources: the static catalog, for clients that attach context ----------------------
 # Resources are read by the client (e.g. @-mentioned in Claude Code), not called by the
 # model. They carry the same data as the list tools; subscriptions aren't offered since
@@ -364,4 +387,27 @@ def fix_stuck_remote(hub: str = "") -> str:
         "4. Tell me what you did. Background: the hub can stay Bluetooth-connected to a streamer (such as "
         "an NVIDIA Shield) without its buttons working, typically after the streamer reboots; restarting the "
         "activity re-establishes it."
+    )
+
+
+@mcp.prompt(title="Move to another remote")
+def migrate_to_another_remote(target: str = "") -> str:
+    """Write a checklist for rebuilding every Harmony activity on another remote (Sofabaton, Home Assistant, ...)."""
+    remote_ = repr(target) if target else "another remote (ask me which one, if I haven't said)"
+    return (
+        f"I'm moving from my Logitech Harmony to {remote_}. Help me rebuild my setup there. Only read: don't "
+        "start, stop or send anything.\n"
+        "1. Call harmony_get_status for the hubs, then harmony_list_devices and harmony_list_activities.\n"
+        "2. Call harmony_describe_activity for every activity on every hub (use each activity's ref).\n"
+        "3. Write a rebuild checklist for that remote, per hub: first the devices to add (manufacturer and model, "
+        "which is how a new remote finds them in its own database); then, per activity, which devices it turns "
+        "on, the input each should be on, the devices it leaves off, and which device should get volume, "
+        "transport, the d-pad, numbers and the other button groups.\n"
+        "4. Where expected_state is 'unknown', or a device's power or input is unknown, say so in the checklist "
+        "and ask me; never fill it in with a guess. Point out devices whose power is a toggle or set by hand, "
+        "since a new remote handles those differently.\n"
+        "5. Remind me that the Harmony hub gives command names, not IR codes, so each device's codes come from "
+        "the new remote's database or from learning them off the original remote; and that "
+        "`mcp-server-harmony export` writes the same information, plus every device's command names, to files I "
+        "can keep."
     )

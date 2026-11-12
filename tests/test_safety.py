@@ -160,6 +160,16 @@ async def test_fix_stuck_remote_prompt(two):
     assert "the hub 'Den'" in body and "harmony_power_off" in body and "harmony_start_activity" in body
 
 
+async def test_migrate_to_another_remote_prompt(two):
+    prompts = {p.name: p for p in (await two.list_prompts()).prompts}
+    assert "migrate_to_another_remote" in prompts
+    body = (await two.get_prompt("migrate_to_another_remote", {"target": "Sofabaton X2"})).messages[0].content.text
+    assert "'Sofabaton X2'" in body and "harmony_describe_activity" in body and "never fill it in" in body
+    assert "not IR codes" in body and "export" in body
+    body = (await two.get_prompt("migrate_to_another_remote", {})).messages[0].content.text
+    assert "ask me which one" in body
+
+
 # --- config validation ------------------------------------------------------------------------------
 def test_config_problems_are_sentences_not_crashes(config_dir):
     (config_dir / "config.json").write_text(

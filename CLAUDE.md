@@ -23,7 +23,13 @@ explain the reasoning behind non-obvious changes instead of only making them.
 - `src/harmony_mcp/hubs.py`: `HubRegistry`, all the hubs, the rule for which one a call means,
   hub-qualified refs (`Den/Watch TV`), the first-call startup grace, bounded shutdown,
   `healthy_count`/`status_summary` (from `available`; they send nothing)
-- `src/harmony_mcp/server.py`: MCP tools, resources and a prompt (`MCPServer` from `mcp` 2.x)
+- `src/harmony_mcp/server.py`: MCP tools, resources and prompts (`MCPServer` from `mcp` 2.x). No tool returns
+  the raw config on purpose (tens of KB the model can't use); `harmony_describe_activity` is the useful part
+- `src/harmony_mcp/export.py`: `describe_activity` (one activity's devices with expected power/input from its
+  `fixit`, ASSUMPTION H-FIXIT, and where each button group goes; the tool and the worksheet share it) and the
+  `export` CLI command's files (`<hub>.json` scrubbed with doctor's `scrub`, `<hub>.md` worksheet, both 0600).
+  Expected state is "unknown" whenever the config doesn't say; never inferred. Not a backup: names, not IR
+  codes, and nothing writes back to a hub; keep saying so
 - `src/harmony_mcp/assumptions.py`: every unverified protocol claim (id, source, confidence, status); the
   `Assumption` record and the queries are shared `registry.py`. `unverified()` is `simulator-only` only:
   `hardware-contradicted` ones were checked, and `doctor` lists them apart
@@ -40,7 +46,7 @@ explain the reasoning behind non-obvious changes instead of only making them.
   `python scripts/sync_shared.py --check` (CI's `shared-drift` job) fails on any difference from the
   locked commit; a weekly scheduled run also fails once mcp-server-shared `main` has moved past it.
 - `src/harmony_mcp/discovery.py` (SSDP), `doctor.py`, `cli.py`: `serve` (default), `check`,
-  `call`, `discover`, `doctor`, `simulate`; `cli.check_health` is `serve --http`'s `/healthz` (any hub
+  `call`, `discover`, `doctor`, `simulate`, `export`; `cli.check_health` is `serve --http`'s `/healthz` (any hub
   `available`; a bare bool, since `/healthz` is answered before the Access check)
 - `src/harmony_mcp/sim/fake_hub.py` + `fixtures/`: a wire-level fake hub (aiohttp) that the real
   aioharmony talks to; used by tests *and* `simulate`
@@ -51,7 +57,7 @@ explain the reasoning behind non-obvious changes instead of only making them.
   fake hub over sockets), `test_catalog`, `test_config`, `test_client`, `test_tools` (in-process
   MCP `Client`), `test_multi_hub`, `test_safety`, `test_tooling`, `test_recorded` (replays
   `doctor --dump` captures), `test_assumptions`, `test_cli`, `test_stdio`, `test_remote`,
-  `test_logsafe`, `test_tasks`. Async tests use anyio's plugin.
+  `test_logsafe`, `test_tasks`, `test_export`. Async tests use anyio's plugin.
 
 ## Rules for changes
 
@@ -129,6 +135,7 @@ CONTRIBUTING.md has the steps and the one-time PyPI setup.
 pip install -e ".[dev]" && pytest && ruff check . && ruff format --check . && mypy
 mcp-server-harmony simulate --write-config /tmp/hcfg   # fake hubs on 127.0.0.1/.2
 mcp-server-harmony check --host <ip> | discover | doctor | call <tool> k=v | serve [--http]
+mcp-server-harmony export [--dir DIR] [--host IP] [--redact]   # <hub>.json + <hub>.md worksheet
 python scripts/sync_shared.py --check [--latest]   # shared files vs mcp-server-shared
 python scripts/sync_shared.py --update             # take mcp-server-shared main
 ```

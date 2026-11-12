@@ -1,4 +1,4 @@
-"""Entry point: `mcp-server-harmony [serve|check|call|discover|doctor|simulate]`.
+"""Entry point: `mcp-server-harmony [serve|check|call|discover|doctor|simulate|export]`.
 
 serve      speak MCP: stdio by default (the client launches it), or --http for
            a long-lived service behind Cloudflare Access (remote.py). --dry-run
@@ -13,6 +13,8 @@ doctor     check each hub layer by layer and say what failed (doctor.py);
            --dump writes redacted fixtures from your real hubs.
 simulate   run wire-level fake hubs (sim/fake_hub.py) on 127.0.0.1 and
            127.0.0.2, so everything above works without hardware.
+export     write each hub's setup to files you keep (export.py): its raw
+           config as JSON and a worksheet for rebuilding it on another remote.
 
 There is no pairing step: a Harmony hub answers anyone on the LAN.
 """
@@ -131,6 +133,52 @@ async def _cmd_doctor(args: argparse.Namespace) -> int:
     report = await run_doctor(settings, timeout=args.timeout, dump_dir=Path(args.dump) if args.dump else None)
     print(to_json(report) if args.json else render(report))
     return 0 if report.ok else 1
+
+
+# --- export -------------------------------------------------------------------------------
+async def _cmd_export(args: argparse.Namespace) -> int:
+    from .config import HubSettings
+    from .export import export_hub
+
+    settings = load_settings()
+    for p in settings.problems:
+        print(f"Config: {p}", file=sys.stderr)
+    hubs = [HubSettings(args.host)] if args.host else list(settings.hubs)
+    if not hubs:
+        print("No hubs configured. Run: mcp-server-harmony check --host <ip>  (or pass --host)", file=sys.stderr)
+        return 2
+    if settings.port is not None:
+        import aioharmony.hubconnector_websocket as ws_connector
+
+        ws_connector.DEFAULT_HUB_PORT = settings.port
+    out_dir = Path(args.dir).expanduser() if args.dir else config_dir() / "export"
+    taken: set[str] = set()
+    failed = 0
+    for h in hubs:
+        r = await export_hub(
+            h.host,
+            h.name,
+            settings,
+            out_dir,
+            redacted=args.redact,
+            # Looked up at call time, so a test can swap cli.HarmonyAPI for a fake as test_cli does.
+            build=lambda host, protocol: HarmonyAPI(ip_address=host, protocol=protocol),
+            timeout=args.timeout,
+            taken=taken,
+        )
+        if r.error:
+            failed += 1
+            print(f"{r.name or h.host}: {r.error}", file=sys.stderr)
+            continue
+        print(f"{r.name}:")
+        for f in r.files:
+            print(f"  {f}")
+    if failed < len(hubs):
+        print(
+            "These are records to rebuild from, not backups: command names, not IR codes, and nothing can be "
+            "written back to a hub." + ("" if args.redact else " Addresses are included; use --redact to share.")
+        )
+    return 0 if failed == 0 else 1
 
 
 # --- simulate -----------------------------------------------------------------------------
@@ -286,6 +334,13 @@ def build_parser() -> argparse.ArgumentParser:
     doc.add_argument("--dump", metavar="DIR", help="also write each hub's redacted raw data to DIR")
     doc.add_argument("--timeout", type=float, default=10.0, help="seconds per step (default 10)")
     doc.add_argument("--host", help="check this address instead of the configured hubs")
+    exp = sub.add_parser(
+        "export", parents=[common], help="Write each hub's setup (raw config and a rebuild worksheet) to files"
+    )
+    exp.add_argument("--dir", help="where to write <hub>.json and <hub>.md (default: export/ in the config folder)")
+    exp.add_argument("--host", help="export this address instead of the configured hubs")
+    exp.add_argument("--redact", action="store_true", help="mask IP and MAC addresses, for sharing the files")
+    exp.add_argument("--timeout", type=float, default=15.0, help="seconds to connect to each hub (default 15)")
     sim = sub.add_parser("simulate", parents=[common], help="Run fake hubs locally, for testing without hardware")
     sim.add_argument("--hubs", type=int, choices=[1, 2], default=2)
     sim.add_argument("--port", type=int, default=8088, help="port for every fake hub (aioharmony uses 8088)")
@@ -299,7 +354,7 @@ def main(argv: list[str] | None = None) -> None:
     parser = build_parser()
     args = parser.parse_args(argv)
 
-    if args.cmd in ("check", "call", "discover", "doctor", "simulate"):
+    if args.cmd in ("check", "call", "discover", "doctor", "simulate", "export"):
         _setup_logging(args, default=logging.WARNING)
         if getattr(args, "dry_run", False):
             os.environ["HARMONY_DRY_RUN"] = "1"
@@ -312,6 +367,8 @@ def main(argv: list[str] | None = None) -> None:
                 sys.exit(asyncio.run(_cmd_discover(args.timeout, args.st, args.raw)))
             if args.cmd == "doctor":
                 sys.exit(asyncio.run(_cmd_doctor(args)))
+            if args.cmd == "export":
+                sys.exit(asyncio.run(_cmd_export(args)))
             sys.exit(asyncio.run(_cmd_simulate(args)))
         sys.exit(130)
 

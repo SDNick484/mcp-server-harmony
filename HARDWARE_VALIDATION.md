@@ -295,6 +295,35 @@ Confirms: **H-CONFIG-PUSH** (step 2), **H-RECONNECT** (step 3).
   elsewhere. `get_status` showed `current_activity` lagging the transition, and the owner's remote press
   chained Xbox, then PS5.
 
+## 10. Describe and export, against the Harmony app
+
+This checks the activity expected state (each activity's `fixit` in the hub's config), which
+nothing else in this server reads.
+
+```sh
+mcp-server-harmony doctor --dump captures/
+cp captures/*.json tests/fixtures/recorded/      # look them over first, as in step 3
+pytest -q tests/test_recorded.py
+mcp-server-harmony export --dir exports/
+mcp-server-harmony call describe_activity activity="$ACT"
+```
+
+Then pick one activity and open it in the Harmony app (its devices, and each device's input), and
+compare:
+
+- Does the activity in the dump have a `fixit` object keyed by device id, with `Power` `"On"` or
+  `"Off"` and an `Input` for the devices it switches? (`grep -c fixit captures/*.json`; firmware
+  4.15.600 is newer than any published dump.) If there is no `fixit`, or it is shaped differently,
+  **H-FIXIT is contradicted**: describe_activity and the worksheet will say `unknown` for
+  everything, and the shape you see is what to record.
+- In `exports/<hub>.md` and the `describe_activity` output: is every device the app shows for
+  that activity listed as `on` with the input the app shows, and the others as `off`? Are the
+  button groups going to the devices the app shows (for example Volume to the receiver)?
+- `exports/<hub>.json` and `.md` have mode 600, and neither contains your Logitech e-mail address
+  (`grep -i "@" exports/*`).
+
+Confirms: **H-FIXIT**.
+
 ---
 
 ## Which step confirms what
@@ -316,6 +345,7 @@ Confirms: **H-CONFIG-PUSH** (step 2), **H-RECONNECT** (step 3).
 | `H-RECONNECT`      | 9    | high              | also confirms the re-read after reconnect; 2026-11-04 reconnect seen, re-read not exercised |
 | `H-SSDP`           | 1    | medium            | no answer can be the network, not the hub                 |
 | `H-TIMING`         | 5    | low               |                                                           |
+| `H-FIXIT`          | 10   | medium            | shape from published dumps of older firmware; compare with the Harmony app |
 
 ## What to send back if something fails
 
