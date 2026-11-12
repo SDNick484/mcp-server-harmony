@@ -8,6 +8,13 @@
 - `harmony_get_status` with no hub configured adds a `hint` saying how to add one, instead of an empty list alone.
 - `scripts/smoke_stdio.py`: launches an installed server over stdio as an MCP client does and checks the first exchange. CI's new `wheel-smoke` job runs it against the built wheel on Linux, macOS and Windows; the release workflow runs it before publishing.
 - Issue templates: a bug report and a hardware report.
+- `harmony_describe_activity` (read-only): the devices an activity involves, with expected power (on/off/unknown) and input, and which device gets each button group. The expected state comes from each activity's `fixit` in the hub's config (new assumption `H-FIXIT`, medium); without one it says `unknown`.
+- `mcp-server-harmony export`: per hub, the raw config (account identifiers removed; `--redact` masks addresses) and a Markdown worksheet for rebuilding the setup on another remote, both readable by the owner only. A record to rebuild from, not a backup.
+- `migrate_to_another_remote(target)` prompt: describes every activity and writes a rebuild checklist for the named remote.
+
+### Fixed
+
+- `doctor --dump` could keep the Logitech account's e-mail address: a real config's `global.timeStampHash` embeds it mid-string, where neither the key list nor log redaction caught it. The scrub now drops that key and any value with an address inside it.
 
 ### Documentation
 

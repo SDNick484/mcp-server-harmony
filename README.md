@@ -91,6 +91,32 @@ networks; `--host` always works.
 activity names that more than one hub has. `doctor --dump DIR` saves a redacted copy of each
 hub's config for `tests/fixtures/recorded/`.
 
+## Export your setup
+
+Logitech stopped making Harmony in 2021, and a hub can only be set up through Logitech's cloud,
+so your setup (devices, what each activity turns on and which input it picks, where each button
+goes) lives only on the hub and in that cloud. `export` writes it down:
+
+```sh
+mcp-server-harmony export                       # every configured hub, into export/ in the config folder
+mcp-server-harmony export --dir ~/harmony --host 192.168.1.60 --redact
+```
+
+For each hub it writes two files, readable by you only:
+
+- `<hub>.json`: the hub's full config as it returned it, with Logitech account identifiers removed
+  (the same scrub as `doctor --dump`). Addresses stay in, since this is your own record; `--redact`
+  masks IPs and MACs for sharing.
+- `<hub>.md`: a worksheet for rebuilding the setup on another remote (Sofabaton, Unfolded Circle,
+  Home Assistant, ...): a devices table, then each activity with every device's expected power
+  and input and which device gets each group of buttons, then every device's command names.
+
+**What it is not: a backup.** The hub's local API returns command *names*, not the IR codes behind
+them, and nothing can be written back to a hub. It is a record to rebuild from: the new remote
+finds each device in its own database by manufacturer and model, or learns the codes from your
+Harmony remote. Expected power and input come from each activity's `fixit` data (`H-FIXIT`);
+where an activity has none, the worksheet says unknown.
+
 ## Use it with an MCP client
 
 Local (stdio): Claude Code and Claude Desktop launch it themselves. With
@@ -186,12 +212,23 @@ startup and by `doctor`.
 | `harmony_start_activity`  | Start an activity and wait until its hub finishes; `unchanged` if it's already running          |
 | `harmony_power_off`       | Run a hub's power-off (or `hub="all"`); `unchanged` if it's already off; `force` sends it anyway |
 | `harmony_send_command`    | Press a command 1-10 times (`repeat`), optionally held (`hold_ms`) or spaced (`delay_ms`)      |
+| `harmony_describe_activity` | Read-only: the devices an activity involves with expected power (on/off/unknown) and input, and which device gets each button group |
 
 Every tool except `harmony_get_status` takes an optional `hub`. Actions return
 `{hub, outcome: done | unchanged | dry_run | error, detail, sent}`, where `sent` lists the frames
 that went to the hub. The server also offers resources (`harmony://hubs`,
-`harmony://hubs/{hub}`) with each hub's catalog, and a `fix_stuck_remote` prompt for the
-Shield's Bluetooth keyboard getting stuck.
+`harmony://hubs/{hub}`) with each hub's catalog, a `fix_stuck_remote` prompt for the
+Shield's Bluetooth keyboard getting stuck, and a `migrate_to_another_remote(target)` prompt that
+describes every activity and writes a rebuild checklist for the remote you name (the chat version
+of [`export`](#export-your-setup)).
+
+There is deliberately no tool that returns a hub's raw config: it is tens of kilobytes that a
+model has no use for. `harmony_describe_activity` returns the part that matters, and `export`
+writes the whole config to a file.
+
+`harmony_describe_activity` reads each activity's `fixit` data from the hub's config (`H-FIXIT`,
+not yet checked on this project's hubs). When an activity has none, it says `expected_state:
+"unknown"` and reports power as `unknown` rather than guessing.
 
 ### A session against the simulator
 
@@ -306,6 +343,7 @@ What the tests cover:
 | `test_tooling.py`     | `doctor`, `discover`, `call`, `simulate`, log redaction                                           |
 | `test_recorded.py`    | Replays configs captured from real hubs (`doctor --dump`)                                        |
 | `test_assumptions.py` | Every assumption appears here and in HARDWARE_VALIDATION.md                                     |
+| `test_export.py`      | `export` against the fake hub: both files, owner-only, no account identifiers, `--redact`        |
 
 ## Verification status
 
@@ -331,6 +369,7 @@ simulator only:
 | `H-RECONNECT`      | high       | simulator-only |
 | `H-SSDP`           | medium     | simulator-only |
 | `H-TIMING`         | low        | simulator-only |
+| `H-FIXIT`          | medium     | simulator-only |
 
 "High" means aioharmony itself depends on it, and Home Assistant's Harmony integration runs on
 aioharmony. `test_assumptions.py` fails if this table and `assumptions.py` disagree.

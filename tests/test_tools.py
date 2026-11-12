@@ -26,6 +26,7 @@ TOOL_NAMES = {
     "harmony_start_activity",
     "harmony_power_off",
     "harmony_send_command",
+    "harmony_describe_activity",
 }
 
 
@@ -83,7 +84,13 @@ async def test_every_tool_has_title_description_and_annotations(mcp_client):
 
 async def test_annotations_match_behavior(mcp_client):
     t = await tools(mcp_client)
-    for name in ("harmony_get_status", "harmony_list_activities", "harmony_list_devices", "harmony_list_commands"):
+    for name in (
+        "harmony_get_status",
+        "harmony_list_activities",
+        "harmony_list_devices",
+        "harmony_list_commands",
+        "harmony_describe_activity",
+    ):
         assert t[name].annotations.read_only_hint is True, name
     assert t["harmony_start_activity"].annotations.idempotent_hint is True  # an activity is a state
     assert t["harmony_power_off"].annotations.idempotent_hint is True
@@ -203,6 +210,51 @@ async def test_power_off_force_on_a_hub_that_looks_off_needs_its_name(mcp_client
     named = await mcp_client.call_tool("harmony_power_off", {"hub": "Living Room", "force": True})
     assert outcomes(named) == [("Living Room", "done")]
     assert fake.started == [-1]
+
+
+async def test_describe_activity(mcp_client, fake):
+    result = await mcp_client.call_tool("harmony_describe_activity", {"activity": "watch shield"})
+    assert not result.is_error, text(result)
+    d = result.structured_content
+    assert (d["hub"], d["name"], d["ref"], d["expected_state"]) == (
+        "Living Room",
+        "Watch Shield",
+        "Living Room/Watch Shield",
+        "hub",
+    )
+    assert [(x["name"], x["power"], x["input"]) for x in d["devices"]] == [
+        ("Onkyo AV Receiver", "on", "STRM BOX"),
+        ("NVIDIA Shield", "on", None),
+        ("Living Room TV", "on", "HDMI 1"),
+    ]
+    assert d["devices"][0]["manufacturer"] == "Onkyo" and d["devices"][0]["model"] == "TX-NR7100"
+    assert "toggle" in d["devices"][2]["notes"][0]
+    assert [(b["group"], b["devices"]) for b in d["buttons"]] == [
+        ("Volume", ["Onkyo AV Receiver"]),
+        ("TransportBasic", ["NVIDIA Shield"]),
+    ]
+    assert fake.sent == [] and fake.started == []  # read-only: nothing went to the hub
+
+
+async def test_describe_activity_lists_devices_it_turns_off(mcp_client):
+    d = (await mcp_client.call_tool("harmony_describe_activity", {"activity": "Listen to Music"})).structured_content
+    assert {x["name"]: x["power"] for x in d["devices"]} == {
+        "Onkyo AV Receiver": "on",
+        "NVIDIA Shield": "off",
+        "Living Room TV": "off",
+    }
+
+
+async def test_describe_activity_publishes_its_schema(mcp_client):
+    t = (await tools(mcp_client))["harmony_describe_activity"]
+    assert t.input_schema["required"] == ["activity"]
+    device = t.output_schema["$defs"]["ExpectedDevice"]
+    assert device["properties"]["power"]["enum"] == ["on", "off", "unknown"]
+
+
+async def test_describe_an_unknown_activity_lists_known_ones(mcp_client):
+    result = await mcp_client.call_tool("harmony_describe_activity", {"activity": "Watch Netflix"})
+    assert result.is_error and "Unknown activity 'Watch Netflix'" in text(result)
 
 
 # --- /healthz under serve --http -----------------------------------------------

@@ -122,6 +122,9 @@ async def test_doctor_all_good_and_dump_is_redacted(fake_on_config, tmp_path):
     assert "protocol assumptions not yet confirmed on hardware" in text
     dumped = (tmp_path / "dump" / "living-room.json").read_text()
     assert "someone@example.invalid" not in dumped and "<redacted>" in dumped
+    # A real config's global.timeStampHash has the account's address buried mid-string, where logsafe's
+    # e-mail pattern doesn't see it; scrub drops it by key and by the address inside it.
+    assert "owner@example.invalid" not in dumped and "ownerhouseholdid" not in dumped
     assert json.loads(dumped)["config"]["activity"][1]["label"] == "Watch Shield"
     assert json.loads(to_json(report))["ok"] is True
 

@@ -123,3 +123,18 @@ async def test_an_offline_hub_is_named_in_unknown_name_errors(mcp_client, fakes)
     server.hubs().hubs[1].catalog = Catalog()
     result = await mcp_client.call_tool("harmony_start_activity", {"activity": "Watch TV"})
     assert result.is_error and "(Den not connected, so its names are unknown.)" in text(result)
+
+
+async def test_describe_activity_never_guesses_the_hub(mcp_client):
+    result = await mcp_client.call_tool("harmony_describe_activity", {"activity": "Listen to Music"})
+    assert result.is_error and "exists on Living Room, Den; pass hub to choose" in text(result)
+    # The Den's Listen to Music has no fixit in its config: unknown, and the routed device is still shown.
+    d = (
+        await mcp_client.call_tool("harmony_describe_activity", {"activity": "Den/Listen to Music"})
+    ).structured_content
+    assert d["hub"] == "Den" and d["expected_state"] == "unknown" and "unknown" in d["note"]
+    assert [(x["name"], x["power"], x["input"]) for x in d["devices"]] == [("Den TV", "unknown", None)]
+    d = (
+        await mcp_client.call_tool("harmony_describe_activity", {"activity": "Watch TV", "hub": "Den"})
+    ).structured_content
+    assert d["expected_state"] == "hub" and d["devices"][0]["input"] == "HDMI 1"
