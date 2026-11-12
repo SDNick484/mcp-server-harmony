@@ -48,11 +48,19 @@ from typing_extensions import TypedDict
 
 from . import __version__
 from .catalog import Catalog, Command
+from .channels import SEPARATORS, looks_like_number, number_problem
 from .client import HarmonyError, HubClient, Outcome, SleepTimerInfo, Status
 from .config import load_settings
 from .export import ActivityDescription, describe_activity
 from .hubs import ALL, NO_HUBS, HubRegistry, ref
-from .limits import MAX_DELAY_MS, MAX_HOLD_MS, MAX_REPEAT, MAX_SLEEP_MINUTES, MIN_DELAY_MS
+from .limits import (
+    MAX_CHANNEL_ARG,
+    MAX_DELAY_MS,
+    MAX_HOLD_MS,
+    MAX_REPEAT,
+    MAX_SLEEP_MINUTES,
+    MIN_DELAY_MS,
+)
 from .lookup import unknown_with_suggestions
 from .tools import ACT, ACT_IDEMPOTENT, READ_ONLY
 
@@ -403,6 +411,108 @@ async def harmony_set_sleep_timer(
     return {"hub": h.name, "outcome": "set", "detail": detail, "sleep_timer": timer}
 
 
+# The buttons that confirm a typed number, in the order tried. The name varies by device: the LG TVs call
+# it OK (label Select), the Onkyo Enter. Looked up in the pool like any command, never sent by guess.
+SELECT_BUTTONS = ("OK", "Select", "Enter")
+
+
+def _digit_buttons(pool: tuple[Command, ...], number: str) -> tuple[list[Command], list[str]]:
+    """The presses for `number` and what the pool lacks to type it: ([commands], [missing, ...]).
+
+    A separator the pool doesn't have falls back to the other one: the "-" and "." on a remote both mean
+    "the sub-channel comes next", and which one a TV has varies (the Bedroom TV has only "-"). Resolving
+    every press before sending any is what keeps a number from being half-typed.
+    """
+    presses: list[Command] = []
+    missing: list[str] = []
+    for ch in number:
+        wanted = [ch] if ch not in SEPARATORS else [ch, *(x for x in SEPARATORS if x != ch)]
+        cmd = next((c for w in wanted if (c := Catalog.find_command(pool, w)) is not None), None)
+        if cmd is None:
+            if ch in SEPARATORS:
+                ch = "separator ('-' or '.')"
+            if ch not in missing:
+                missing.append(ch)
+        else:
+            presses.append(cmd)
+    return presses, missing
+
+
+@mcp.tool(title="Tune to a channel", annotations=_ACT)
+async def harmony_tune_channel(
+    channel: Annotated[
+        str,
+        Field(
+            min_length=1,
+            max_length=MAX_CHANNEL_ARG,
+            description="A channel number such as 702, 5.1 or 5-1, or a favorite's name (e.g. 'ESPN').",
+        ),
+    ],
+    hub: Hub = None,
+    device: Annotated[
+        str | None,
+        Field(description="Press the digits on this device (name or ref). Omit to use the running activity's buttons."),
+    ] = None,
+    enter: Annotated[
+        bool, Field(description="Press the select button (OK/Enter) after the digits, for boxes that wait for it.")
+    ] = False,
+) -> ActionResult:
+    """Tune to a channel by pressing its digit buttons, e.g. channel='702', '5.1' or a favorite like 'ESPN'.
+
+    The digits go out as one sequence, refused whole if the hub is busy or rate-limited. Without device they go
+    through the running activity, which must route the digit buttons to the tuner (an activity that doesn't says
+    so; name a device that has them). Set enter=True only if the box waits for a confirm press. This presses
+    buttons like harmony_send_command does; it does not use the hub's own change-channel command.
+    """
+    r = await ready_hubs()
+    text = channel.strip()
+    favorite_name = None
+    if looks_like_number(text):
+        if (why := number_problem(text)) is not None:
+            raise HarmonyError(why)
+        number = text
+    else:
+        fav_hub, favorite_name, number = r.favorite(text, hub, device)
+        hub = fav_hub.name  # a favorite belongs to one hub, so that's the hub the call is about
+    if device is None:
+        h, act = r.running(hub)
+        pool, where = act.commands, f"activity {act.name}"
+    else:
+        h, dev = r.device(device, hub)
+        pool, where = dev.commands, f"device {dev.name}"
+    # ASSUMPTION H-DIGITS: the digit commands are named 0-9 (and '-' or '.'), and pressing them tunes.
+    presses, missing = _digit_buttons(pool, number)
+    if missing:
+        have = [d.name for d in h.catalog.devices if not _digit_buttons(d.commands, number)[1]]
+        instead = (
+            f"Pass device= one of: {', '.join(have)}."
+            if have
+            else "No device on this hub has them; press the number on the remote."
+        )
+        if device is None:
+            instead += " Or start an activity that routes the digit buttons."
+        raise HarmonyError(
+            f"{where} on {h.name} has no {', '.join(missing)} button, which channel {number} needs. {instead}"
+        )
+    pressed = [c.name for c in presses]
+    if enter:
+        target = presses[-1].device_id
+        same = tuple(c for c in pool if c.device_id == target)
+        select = next((c for w in SELECT_BUTTONS if (c := Catalog.find_command(same, w)) is not None), None)
+        if select is None:
+            raise HarmonyError(
+                f"{where} on {h.name} has no select button ({', '.join(SELECT_BUTTONS)}) for "
+                f"{h.catalog.device_name(target)}, the device that gets the digits. Call again without enter, "
+                "or press the confirm button with harmony_send_command if it is on another device."
+            )
+        presses.append(select)
+        pressed.append(select.name)
+    outcome = await h.send_sequence(presses, f"tune {number}")
+    named = f" ({favorite_name})" if favorite_name else ""
+    done = f"tune {h.name} to channel {number}{named} by pressing {', '.join(pressed)}"
+    return _result(h, outcome, done, "")
+
+
 # --- resources: the static catalog, for clients that attach context ----------------------
 # Resources are read by the client (e.g. @-mentioned in Claude Code), not called by the
 # model. They carry the same data as the list tools; subscriptions aren't offered since
@@ -412,6 +522,7 @@ def _catalog_doc(h: HubClient) -> dict[str, object]:
     return {
         "hub": h.name,
         "reachable": h.available,
+        "channels": h.hub.channels,  # favorites for harmony_tune_channel, from config.json
         "activities": [{"ref": ref(h, a.name), "commands": [c.name for c in a.commands]} for a in cat.activities],
         "devices": [{"ref": ref(h, d.name), "commands": [c.name for c in d.commands]} for d in cat.devices],
     }

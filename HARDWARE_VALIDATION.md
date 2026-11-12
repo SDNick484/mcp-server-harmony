@@ -344,6 +344,39 @@ must stay running while the timer counts down; a `call` exits first and takes th
 
 Confirms nothing new, but record what the two-minute timer did here.
 
+## 12. Tune a channel
+
+The owner has no cable box, so this uses an LG TV's own tuner (antenna or cable into the TV). Use the
+hub whose TV has one and start its TV activity (Bedroom: "Bedroom TV"), then:
+
+```sh
+HUB="Bedroom Hub"    # yours here
+mcp-server-harmony call --dry-run tune_channel channel=702 hub="$HUB"
+mcp-server-harmony call tune_channel channel=7 hub="$HUB"
+mcp-server-harmony call tune_channel channel=5.1 hub="$HUB"     # a sub-channel, if the TV receives one
+mcp-server-harmony call tune_channel channel=5-1 hub="$HUB" enter=true
+```
+
+Expected: the dry run lists `sent` as the digits (`.../7`, `.../0`, `.../2`) and nothing happens on the TV.
+Then watch the TV's channel banner:
+
+- Does the channel change at all? (That is what **H-DIGITS** claims; record it.)
+- Does the whole number land, or does the TV take only the first digit or two? If digits are lost or
+  merged, `DIGIT_GAP_MS` in `limits.py` (400 ms) is too short or too long for this TV; note which.
+- Does a one-digit channel (`7`) change at once, or wait for a timeout or for `enter=true`?
+- For `5.1` and `5-1`: which separator does the LG TV accept, and does the fallback to the other
+  one (when the activity has only `-`) tune the same sub-channel?
+- With `enter=true`: does the TV treat the select press (`OK`, label `Select`) as "go to this channel",
+  or does it open a menu or change something else on screen? If it does something else, `enter` is wrong
+  for LG TVs; say so in `note`.
+
+Also check the refusals, with the TV on an activity that routes no digits (Bedroom: "Watch Shield" or
+another non-TV activity): `call tune_channel channel=702 hub="$HUB"` should fail naming the missing
+buttons and suggesting a device that has them; nothing is sent. With favorites in `config.json`
+(`"channels": {"KQED": "9.1"}`), `call tune_channel channel=kqed hub="$HUB"` should tune the same way.
+
+Confirms: **H-DIGITS** (record the timing and separator behavior in `note`).
+
 ---
 
 ## Which step confirms what
@@ -366,6 +399,7 @@ Confirms nothing new, but record what the two-minute timer did here.
 | `H-SSDP`           | 1    | medium            | no answer can be the network, not the hub                 |
 | `H-TIMING`         | 5    | low               |                                                           |
 | `H-FIXIT`          | 10   | medium            | shape from published dumps of older firmware; compare with the Harmony app |
+| `H-DIGITS`         | 12   | medium            | names and routing read 2026-11-12; that the presses tune a channel is untried |
 
 ## What to send back if something fails
 

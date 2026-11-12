@@ -201,7 +201,20 @@ def _parse_fixit(raw: Any) -> tuple[ExpectedState, ...] | None:
 
 
 def _find(commands: tuple[Command, ...], wanted: str) -> Command | None:
+    # Exact names first. norm() keeps only letters and digits, so the "-" and "." buttons (the channel
+    # separators on a TV remote) both normalise to "" and the loose match below would hand back
+    # whichever of them comes first. Matching the hub's own spelling first finds each one by itself.
+    for c in commands:
+        if c.name == wanted:
+            return c
+    for c in commands:
+        if c.label == wanted:
+            return c
     key = norm(wanted)
+    if not key:
+        # Nothing left to compare after normalising (a bare "-" or "."): the exact passes above are the
+        # only fair match. Falling through would match every punctuation-only command to every other.
+        return None
     for c in commands:
         if norm(c.name) == key or norm(c.label) == key:
             return c

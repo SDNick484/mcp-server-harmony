@@ -147,7 +147,8 @@ async def test_resources_list_the_catalog(two):
     doc = json.loads((await two.read_resource("harmony://hubs")).contents[0].text)
     assert [h["hub"] for h in doc] == ["Living Room", "Den"]
     den = json.loads((await two.read_resource("harmony://hubs/Den")).contents[0].text)
-    assert den["activities"][0] == {"ref": "Den/Watch TV", "commands": ["VolumeUp"]}
+    # Watch TV also routes the digit buttons (see test_channels.py), so only its first command is pinned.
+    assert den["activities"][0]["ref"] == "Den/Watch TV" and den["activities"][0]["commands"][0] == "VolumeUp"
     living = json.loads((await two.read_resource("harmony://hubs/Living%20Room")).contents[0].text)
     assert living["hub"] == "Living Room"
 

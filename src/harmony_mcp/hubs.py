@@ -30,6 +30,7 @@ import aioharmony.hubconnector_websocket as ws_connector
 from aioharmony.harmonyapi import HarmonyAPI
 
 from .catalog import Activity, Command, Device
+from .channels import favorite
 from .client import ApiFactory, HarmonyError, HubClient
 from .config import Settings
 
@@ -238,6 +239,33 @@ class HubRegistry:
             raise HarmonyError(f"Activities are running on {running}; pass hub to choose.")
         where = pool[0].name if hub is not None else "any hub"
         raise HarmonyError(f"No activity is running on {where}. Name a device, or start an activity first.")
+
+    def favorite(self, name: str, hub: str | None, device: str | None) -> tuple[HubClient, str, str]:
+        """(hub, favorite's name, its number) for a channel favorite.
+
+        Favorites belong to a hub (its provider's lineup), so the hub decides. Given a hub, or a device
+        (which belongs to one), that is the hub. Otherwise the hubs that have the name; when several do,
+        the one with an activity running, and when that is still not one hub, the question goes back
+        with their names. Never a guess: the wrong hub is the wrong room's TV.
+        """
+        pool = [self.device(device, hub)[0]] if device is not None else self.candidates(hub)
+        hits = [(h, f) for h in pool if (f := favorite(h.hub.channels, name)) is not None]
+        if len(hits) > 1:
+            on = [(h, f) for h, f in hits if h.current_activity() is not None]
+            if len(on) == 1:
+                hits = on
+        if len(hits) == 1:
+            h, (fav, number) = hits[0]
+            return h, fav, number
+        if hits:
+            raise HarmonyError(
+                f"Channel {name!r} is a favorite on {_list([h.name for h, _ in hits])}; pass hub to choose."
+            )
+        per_hub = "; ".join(f"{h.name}: {_list(list(h.hub.channels))}" for h in pool)
+        raise HarmonyError(
+            f"Unknown channel {name!r}. Favorites: {per_hub}. Or give a number like 702 or 5.1."
+            + ("" if any(h.hub.channels for h in pool) else ' Add favorites under "channels" for a hub in config.json.')
+        )
 
     def to_power_off(self, hub: str | None) -> list[HubClient]:
         """Which hubs power_off should act on. Empty means everything is already off.

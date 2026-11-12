@@ -26,3 +26,14 @@ MAX_CALL_SECONDS = 15.0  # repeat * (hold + delay) for one send_command
 # Sleep timer: the longest one `harmony_set_sleep_timer` accepts. Twelve hours covers "turn it off when I'm
 # asleep" and keeps a forgotten timer from firing days later; the timer is only in memory anyway.
 MAX_SLEEP_MINUTES = 12 * 60
+# Tuning a channel (harmony_tune_channel): the pause between the digit presses. Like repeat_gap it keeps an
+# IR receiver from merging two quick presses into one; a TV's own channel entry also times out if the
+# digits come too slowly, so it is not longer than that.
+DIGIT_GAP_MS = 400
+# A channel number: at most this many digits, with at most one "-" or "." between two of them
+# (702, 5.1, 5-1, 1234.56). Longer is not a channel, it's a mistake worth refusing before pressing.
+MAX_CHANNEL_DIGITS = 6
+# Presses in one send_sequence: the digits, one separator and the select button.
+MAX_SEQUENCE = MAX_CHANNEL_DIGITS + 2
+# The channel argument also takes a favorite's name, which is longer than a number.
+MAX_CHANNEL_ARG = 40

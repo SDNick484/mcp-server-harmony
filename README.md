@@ -219,6 +219,17 @@ transport race. `HARMONY_HOST` (one hub) and the older `{"host": ...}` form stil
 Problems (a host with a port, duplicate hosts or names, invalid JSON) are reported by name at
 startup and by `doctor`.
 
+**Channel favorites.** A hub may also have a `channels` map, a name for each channel number
+`harmony_tune_channel` can press (lineups differ per TV provider, so they belong to a hub):
+
+```json
+{ "host": "192.168.1.60", "name": "Living Room", "channels": { "ESPN": "702", "KQED": "9.1" } }
+```
+
+Numbers are strings of up to 6 digits with at most one `-` or `.`; a bad entry is skipped and reported
+like any other config problem. `check` keeps the map when it rewrites the file, and
+`harmony://hubs/{hub}` shows it.
+
 ## Tools
 
 | Tool                      | What it does                                                                                     |
@@ -232,6 +243,7 @@ startup and by `doctor`.
 | `harmony_send_command`    | Press a command 1-10 times (`repeat`), optionally held (`hold_ms`) or spaced (`delay_ms`)      |
 | `harmony_describe_activity` | Read-only: the devices an activity involves with expected power (on/off/unknown) and input, and which device gets each button group |
 | `harmony_set_sleep_timer` | Turn a hub's TV system off in 1-720 minutes (`minutes`; 0 cancels); a new one replaces the old; see [Sleep timer](#sleep-timer) |
+| `harmony_tune_channel`    | Press a channel number (`702`, `5.1`, `5-1`) or a favorite's name as one digit sequence; `enter` adds a select press |
 
 Every tool except `harmony_get_status` takes an optional `hub`. Actions return
 `{hub, outcome: done | unchanged | dry_run | error, detail, sent}`, where `sent` lists the frames
@@ -293,8 +305,11 @@ Two hubs that both have "Listen to Music". (Output from `simulate`, trimmed.)
 - **The hub's own config is the allow-list.** Activity, device and command names are resolved
   against what the hub already knows. There's no way to send a raw IR code, an unknown device
   id, or a command from one device to another.
-- **Left out on purpose:** `sync` (talks to Logitech's cloud), `change_channel`, and anything
-  that edits the hub's configuration.
+- **Left out on purpose:** `sync` (talks to Logitech's cloud), the hub's `change_channel` engine
+  command, and anything that edits the hub's configuration. Tuning works by digit presses
+  (`harmony_tune_channel`), each one a command the hub's config already lists and resolved through
+  the catalog like any other press, so the allow-list still bounds it; `change_channel` would hand
+  the hub a free-form channel and skip that.
 - **No interleaving with activity sequences.** While a hub is starting an activity or powering
   off, its commands are refused with "busy, try again", since a press mid-sequence can land on
   a device that's still warming up. The one exception is `power_off(force=true)`, for a sequence
@@ -307,7 +322,8 @@ Two hubs that both have "Listen to Music". (Output from `simulate`, trimmed.)
 - **Rate limits and caps, per hub.** Per call: at most 10 repeats, held up to 3 s, 100-2000 ms
   apart, 15 s in total. Across calls (a model in a loop): 20 presses in a burst, then 4 a
   second; 4 activity changes in a burst, then one per 15 s. A call over the limit is refused
-  whole, never half-sent.
+  whole, never half-sent. A channel number is one sequence of up to 8 presses, 400 ms apart, charged
+  and refused as a whole.
 - **Dry run.** `serve --dry-run` (or `call --dry-run`) reads the hubs and reports what it
   would send.
 - **Resilient.** Each hub reconnects with backoff, and re-reads its state after a reconnect. If the
@@ -364,6 +380,7 @@ What the tests cover:
 | `test_recorded.py`    | Replays configs captured from real hubs (`doctor --dump`)                                        |
 | `test_assumptions.py` | Every assumption appears here and in HARDWARE_VALIDATION.md                                     |
 | `test_export.py`      | `export` against the fake hub: both files, owner-only, no account identifiers, `--redact`        |
+| `test_channels.py`    | Tuning: channel numbers, favorites, the digit sequence, and the `-`/`.` lookup fix                |
 
 ## Verification status
 
@@ -390,6 +407,7 @@ simulator only:
 | `H-SSDP`           | medium     | simulator-only |
 | `H-TIMING`         | low        | simulator-only |
 | `H-FIXIT`          | medium     | simulator-only |
+| `H-DIGITS`         | medium     | simulator-only |
 
 "High" means aioharmony itself depends on it, and Home Assistant's Harmony integration runs on
 aioharmony. `test_assumptions.py` fails if this table and `assumptions.py` disagree.
