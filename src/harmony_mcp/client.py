@@ -22,7 +22,7 @@ import contextlib
 import logging
 import math
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
@@ -38,10 +38,12 @@ from .config import HubSettings, Protocol
 from .limits import (
     ACTIVITY_CAPACITY,
     ACTIVITY_RATE,
+    DIGIT_GAP_MS,
     MAX_CALL_SECONDS,
     MAX_DELAY_MS,
     MAX_HOLD_MS,
     MAX_REPEAT,
+    MAX_SEQUENCE,
     MIN_DELAY_MS,
     PRESS_CAPACITY,
     PRESS_RATE,
@@ -151,6 +153,8 @@ class HubClient:
     # Gap between repeated presses. Without one, IR receivers often merge two
     # quick presses into one long press.
     repeat_gap = 0.4
+    # Gap between the different buttons of one send_sequence (the digits of a channel).
+    sequence_gap = DIGIT_GAP_MS / 1000
     # First reconnect wait; doubles up to 60s. (Class attributes so tests can shrink them.)
     retry_delay = 1.0
     # How long stop() gives each background task. Under HubRegistry's per-hub STOP_TIMEOUT (5s), so a
@@ -629,6 +633,42 @@ class HubClient:
             "minutes_left": max(0, math.ceil(left / self.sleep_unit)),
             "retrying": timer.retry_reason if timer.firing else None,
         }
+
+    async def send_sequence(self, commands: Sequence[Command], what: str) -> Outcome:
+        """Press different commands one after another, as one call: a channel number's digits.
+
+        send() repeats one command; this sends a list of them with sequence_gap between presses. It is
+        one operation to the guards, so a half-typed number can't happen:
+          - one busy check up front (no press lands mid activity-sequence),
+          - one rate-limit charge for all the presses, refused whole when the bucket is short (three
+            of five digits would tune to the wrong channel, which is worse than none),
+          - one dry-run report listing every press.
+        `what` names it in the refusal and the log ("tune 702"). The caller resolved every command
+        through the Catalog already; nothing here takes a name.
+        """
+        api = self._require_idle(what)
+        if not 1 <= len(commands) <= MAX_SEQUENCE:
+            raise HarmonyError(f"A sequence is 1-{MAX_SEQUENCE} presses, not {len(commands)}.")
+        # Charge before the dry-run check, like send(): a dry run shows the limit a real call would hit.
+        self._limit(self.press_bucket, len(commands), what)
+        sent = [f"holdAction press+release {self.catalog.device_name(c.device_id)}/{c.name}" for c in commands]
+        if self.dry_run:
+            log.info("[dry-run] %s: would send %s", self.name, ", ".join(sent))
+            return Outcome(changed=False, dry_run=True, sent=sent)
+        sequence: list[Any] = []
+        for i, c in enumerate(commands):
+            if i:
+                sequence.append(self.sequence_gap)
+            sequence.append(SendCommandDevice(device=c.device_id, command=c.name, delay=0))
+        errors = await api.send_commands(sequence)
+        if errors:
+            e = errors[0]
+            # Presses before the failed one did go out; say so, so nobody assumes nothing happened.
+            raise HarmonyError(
+                f"{self.name} rejected {e.command.command} for {self.catalog.device_name(e.command.device)} while "
+                f"{what}: {e.msg} (code {e.code}). The presses before it were sent."
+            )
+        return Outcome(changed=True, sent=sent)
 
     # --- reporting -----------------------------------------------------------
     def _name(self, activity_id: int | None) -> str:

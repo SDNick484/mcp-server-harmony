@@ -25,6 +25,76 @@
        "action": "{\"command\": \"VolumeUp\", \"type\": \"IRCommand\", \"deviceId\": \"72000001\"}"
       }
      ]
+    },
+    {
+     "name": "NumericBasic",
+     "function": [
+      {
+       "name": "0",
+       "label": "0",
+       "action": "{\"command\": \"0\", \"type\": \"IRCommand\", \"deviceId\": \"72000001\"}"
+      },
+      {
+       "name": "1",
+       "label": "1",
+       "action": "{\"command\": \"1\", \"type\": \"IRCommand\", \"deviceId\": \"72000001\"}"
+      },
+      {
+       "name": "2",
+       "label": "2",
+       "action": "{\"command\": \"2\", \"type\": \"IRCommand\", \"deviceId\": \"72000001\"}"
+      },
+      {
+       "name": "3",
+       "label": "3",
+       "action": "{\"command\": \"3\", \"type\": \"IRCommand\", \"deviceId\": \"72000001\"}"
+      },
+      {
+       "name": "4",
+       "label": "4",
+       "action": "{\"command\": \"4\", \"type\": \"IRCommand\", \"deviceId\": \"72000001\"}"
+      },
+      {
+       "name": "5",
+       "label": "5",
+       "action": "{\"command\": \"5\", \"type\": \"IRCommand\", \"deviceId\": \"72000001\"}"
+      },
+      {
+       "name": "6",
+       "label": "6",
+       "action": "{\"command\": \"6\", \"type\": \"IRCommand\", \"deviceId\": \"72000001\"}"
+      },
+      {
+       "name": "7",
+       "label": "7",
+       "action": "{\"command\": \"7\", \"type\": \"IRCommand\", \"deviceId\": \"72000001\"}"
+      },
+      {
+       "name": "8",
+       "label": "8",
+       "action": "{\"command\": \"8\", \"type\": \"IRCommand\", \"deviceId\": \"72000001\"}"
+      },
+      {
+       "name": "9",
+       "label": "9",
+       "action": "{\"command\": \"9\", \"type\": \"IRCommand\", \"deviceId\": \"72000001\"}"
+      },
+      {
+       "name": "-",
+       "label": "-",
+       "action": "{\"command\": \"-\", \"type\": \"IRCommand\", \"deviceId\": \"72000001\"}"
+      }
+     ]
+    },
+    {
+     "name": "NavigationBasic",
+     "function": [
+      {
+       "name": "OK",
+       "label": "Select",
+       "action": "{\"command\": \"OK\", \"type\": \"IRCommand\", \"deviceId\": \"72000001\"}"
+      }
+     ]
     }
    ],
    "fixit": {
@@ -66,6 +136,76 @@
        "name": "VolumeUp",
        "label": "Volume Up",
        "action": "{\"command\": \"VolumeUp\", \"type\": \"IRCommand\", \"deviceId\": \"72000001\"}"
+      }
+     ]
+    },
+    {
+     "name": "NumericBasic",
+     "function": [
+      {
+       "name": "0",
+       "label": "0",
+       "action": "{\"command\": \"0\", \"type\": \"IRCommand\", \"deviceId\": \"72000001\"}"
+      },
+      {
+       "name": "1",
+       "label": "1",
+       "action": "{\"command\": \"1\", \"type\": \"IRCommand\", \"deviceId\": \"72000001\"}"
+      },
+      {
+       "name": "2",
+       "label": "2",
+       "action": "{\"command\": \"2\", \"type\": \"IRCommand\", \"deviceId\": \"72000001\"}"
+      },
+      {
+       "name": "3",
+       "label": "3",
+       "action": "{\"command\": \"3\", \"type\": \"IRCommand\", \"deviceId\": \"72000001\"}"
+      },
+      {
+       "name": "4",
+       "label": "4",
+       "action": "{\"command\": \"4\", \"type\": \"IRCommand\", \"deviceId\": \"72000001\"}"
+      },
+      {
+       "name": "5",
+       "label": "5",
+       "action": "{\"command\": \"5\", \"type\": \"IRCommand\", \"deviceId\": \"72000001\"}"
+      },
+      {
+       "name": "6",
+       "label": "6",
+       "action": "{\"command\": \"6\", \"type\": \"IRCommand\", \"deviceId\": \"72000001\"}"
+      },
+      {
+       "name": "7",
+       "label": "7",
+       "action": "{\"command\": \"7\", \"type\": \"IRCommand\", \"deviceId\": \"72000001\"}"
+      },
+      {
+       "name": "8",
+       "label": "8",
+       "action": "{\"command\": \"8\", \"type\": \"IRCommand\", \"deviceId\": \"72000001\"}"
+      },
+      {
+       "name": "9",
+       "label": "9",
+       "action": "{\"command\": \"9\", \"type\": \"IRCommand\", \"deviceId\": \"72000001\"}"
+      },
+      {
+       "name": "-",
+       "label": "-",
+       "action": "{\"command\": \"-\", \"type\": \"IRCommand\", \"deviceId\": \"72000001\"}"
+      }
+     ]
+    },
+    {
+     "name": "NavigationBasic",
+     "function": [
+      {
+       "name": "OK",
+       "label": "Select",
+       "action": "{\"command\": \"OK\", \"type\": \"IRCommand\", \"deviceId\": \"72000001\"}"
       }
      ]
     }

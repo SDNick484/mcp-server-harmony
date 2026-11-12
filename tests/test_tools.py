@@ -28,6 +28,7 @@ TOOL_NAMES = {
     "harmony_send_command",
     "harmony_describe_activity",
     "harmony_set_sleep_timer",
+    "harmony_tune_channel",
 }
 
 

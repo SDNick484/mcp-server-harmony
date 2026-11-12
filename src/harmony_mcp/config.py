@@ -13,6 +13,10 @@ One server can drive several hubs (say, one per TV). ``config.json``::
       ]
     }
 
+A hub may also list channel favorites, a name for each number harmony_tune_channel can press::
+
+    {"host": "192.168.1.60", "name": "Living Room", "channels": {"ESPN": "702", "KQED": "9.1"}}
+
 ``name`` is optional. Each hub has its own name, set in the Harmony app
 (aioharmony reports it as ``friendlyName``), and ``check`` saves that name here
 the first time it sees the hub, so the name is known even when a hub is
@@ -35,9 +39,11 @@ import json
 import logging
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
+
+from .channels import favorite, looks_like_number, number_problem
 
 log = logging.getLogger(__name__)
 
@@ -60,6 +66,9 @@ def config_dir() -> Path:
 class HubSettings:
     host: str
     name: str | None = None  # from config.json; None until `check` saves the hub's own name
+    # Favorite channels, name -> number ("ESPN": "702"). Channel lineups differ per TV provider, so
+    # they belong to a hub, not to the server. Validated in _channels; only good entries get here.
+    channels: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -122,6 +131,32 @@ def _read_json(path: Path, problems: list[str] | None = None) -> dict[str, Any]:
     return data
 
 
+def _channels(raw: Any, hub: str, problems: list[str]) -> dict[str, str]:
+    """A hub's "channels" map, keeping the entries that are a name and a channel number."""
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        problems.append(f'ignoring "channels" for hub {hub} in config.json: expected an object like {{"ESPN": "702"}}')
+        return {}
+    out: dict[str, str] = {}
+    for name, number in raw.items():
+        # A JSON number would lose "5.10" to 5.1, and a float can't say "5-1"; the value is typed as text.
+        if not isinstance(number, str):
+            problems.append(f'ignoring channel {name!r} for hub {hub}: the number must be a string like "702" or "5.1"')
+        elif looks_like_number(name):
+            # harmony_tune_channel reads digits-and-separators as a number before it looks at favorites.
+            problems.append(f"ignoring channel {name!r} for hub {hub}: a name made of digits would read as a number")
+        elif not any(ch.isalnum() for ch in name):
+            problems.append(f"ignoring channel {name!r} for hub {hub}: the name needs a letter or a digit")
+        elif (why := number_problem(number)) is not None:
+            problems.append(f"ignoring channel {name!r} for hub {hub}: {why}")
+        elif (dup := favorite(out, name)) is not None:
+            problems.append(f"channels {dup[0]!r} and {name!r} for hub {hub} are the same name; using the first")
+        else:
+            out[name.strip()] = number.strip()
+    return out
+
+
 def _file_hubs(data: dict[str, Any], problems: list[str] | None = None) -> list[HubSettings]:
     """The hubs in config.json, in order, without duplicates."""
     problems = [] if problems is None else problems
@@ -134,7 +169,12 @@ def _file_hubs(data: dict[str, Any], problems: list[str] | None = None) -> list[
             hub = HubSettings(e.strip())
         elif isinstance(e, dict) and isinstance(e.get("host"), str) and e["host"].strip():
             name = e.get("name")
-            hub = HubSettings(e["host"].strip(), name.strip() if isinstance(name, str) and name.strip() else None)
+            host = e["host"].strip()
+            hub = HubSettings(
+                host,
+                name.strip() if isinstance(name, str) and name.strip() else None,
+                _channels(e.get("channels"), host, problems),
+            )
         else:
             problems.append(f"ignoring hub entry {e!r} in config.json: expected a host or {{host, name}}")
             continue
@@ -154,13 +194,16 @@ def load_settings() -> Settings:
     hubs = _file_hubs(data, problems)
     env = os.environ.get("HARMONY_HOSTS") or os.environ.get("HARMONY_HOST")
     if env:
-        names = {h.host: h.name for h in hubs}
+        # The environment replaces the list of hubs, not what the file says about each one.
+        known = {h.host: h for h in hubs}
         hubs = []
         for host in dict.fromkeys(h.strip() for h in env.split(",") if h.strip()):
             if (why := _host_problem(host)) is not None:
                 problems.append(f"ignoring a hub from HARMONY_HOSTS: {why}")
             else:
-                hubs.append(HubSettings(host, names.get(host)))
+                hubs.append(
+                    HubSettings(host, known[host].name, known[host].channels) if host in known else HubSettings(host)
+                )
     seen: dict[str, str] = {}
     for h in hubs:
         if h.name:
@@ -198,6 +241,13 @@ def save_hub(host: str, name: str | None) -> Path:
     path = d / "config.json"
     data = _read_json(path)
     hubs = _file_hubs(data)
+    # Keep each hub's "channels" as written. Rewriting it from the parsed settings would silently drop
+    # an entry that failed validation, and the owner's typo is theirs to fix, not ours to delete.
+    raw_channels = {
+        e["host"].strip(): e["channels"]
+        for e in reversed(data.get("hubs") or [])
+        if isinstance(e, dict) and isinstance(e.get("host"), str) and "channels" in e
+    }
     data.pop("host", None)
     for i, h in enumerate(hubs):
         if h.host == host:
@@ -206,6 +256,13 @@ def save_hub(host: str, name: str | None) -> Path:
             break
     else:
         hubs.append(HubSettings(host, name))
-    data["hubs"] = [{"host": h.host, "name": h.name} if h.name else {"host": h.host} for h in hubs]
+    data["hubs"] = [
+        {
+            "host": h.host,
+            **({"name": h.name} if h.name else {}),
+            **({"channels": raw_channels[h.host]} if h.host in raw_channels else {}),
+        }
+        for h in hubs
+    ]
     path.write_text(json.dumps(data, indent=2) + "\n")
     return path

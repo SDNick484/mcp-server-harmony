@@ -35,6 +35,7 @@ __all__ = ["ASSUMPTIONS", "BY_ID", "Assumption", "contradicted", "doctor_lines",
 
 # Hardware runs, cited by the notes below.
 _HW_2026_10_14 = "2026-10-14, two real hubs (Harmony Hub, Office Hub, firmware 4.15.600) via the service on LXC210"
+_HW_2026_11_12 = "2026-11-12, Office Hub and Bedroom Hub (firmware 4.15.600), config read through this server"
 _HW_2026_11_04 = (
     "2026-11-04, Office Hub and Bedroom Hub (firmware 4.15.600) driven through this server from a Claude session"
 )
@@ -169,6 +170,18 @@ ASSUMPTIONS: tuple[Assumption, ...] = (
         "Hubs answer an SSDP M-SEARCH for ST urn:myharmony-com:device:harmony:1, with LOCATION on the hub's address.",
         "Home Assistant's harmony manifest matches that deviceType; HA may learn it from NOTIFY, not M-SEARCH",
         "medium",
+    ),
+    Assumption(
+        "H-DIGITS",
+        "A device with a tuner exposes digit commands named 0 to 9 in control group NumericBasic (plus '-' and "
+        "sometimes '.' as the sub-channel separator), and pressing them in sequence, a gap apart, tunes the "
+        "channel.",
+        "how a physical remote works; the command names and an activity's routing of them were read from the hubs",
+        "medium",
+        note="Partial, " + _HW_2026_11_12 + ": the LG TVs have '0' to '9' and '-' in NumericBasic (one also "
+        "'.'), and the Bedroom Hub's 'Bedroom TV' activity routes them to the TV. Never tried: that pressing "
+        "them tunes a channel, the 400 ms gap between digits, the separator, and the select button that "
+        "ends the entry (OK, label Select, on the LG TVs; Enter on the Onkyo).",
     ),
     Assumption(
         "H-TIMING",

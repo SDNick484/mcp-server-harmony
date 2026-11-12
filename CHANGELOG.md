@@ -13,10 +13,12 @@
 - `migrate_to_another_remote(target)` prompt: describes every activity and writes a rebuild checklist for the named remote.
 - `harmony_set_sleep_timer(minutes, hub=None)`: turns a hub's TV system off after 1-720 minutes (0 cancels), replacing a timer already set. It runs the normal power off, so the busy guard, rate limit and dry run apply, and retries for five minutes if the hub is busy or unreachable. The hub going off first drops it; switching activities keeps it. Held in the server's memory only (it outlives the chat under `serve --http`, not over stdio).
 - `harmony_get_status` gives each hub `sleep_timer` (when it fires, minutes left, or null) and `last_sleep_timer` (how the last one ended: fired, cancelled or failed, and why). Both are always present, null when empty.
+- `harmony_tune_channel`: tune by pressing a channel's digits (`702`, `5.1`, `5-1`) through the running activity or a named `device`, or by a favorite's name from the hub's new `channels` map in `config.json` (shown in `harmony://hubs/{hub}`, kept by `check`). The digits go out as one sequence (`HubClient.send_sequence`): one busy check, one rate-limit charge refused whole, one dry-run report. `enter` adds the select button. New assumption `H-DIGITS`.
 
 ### Fixed
 
 - `doctor --dump` could keep the Logitech account's e-mail address: a real config's `global.timeStampHash` embeds it mid-string, where neither the key list nor log redaction caught it. The scrub now drops that key and any value with an address inside it.
+- `harmony_send_command` could not tell the `-` and `.` buttons apart (both normalised to nothing, so the first one won). Exact names are now matched before the normalised match.
 
 ### Documentation
 

@@ -35,6 +35,8 @@ explain the reasoning behind non-obvious changes instead of only making them.
 - `src/harmony_mcp/assumptions.py`: every unverified protocol claim (id, source, confidence, status); the
   `Assumption` record and the queries are shared `registry.py`. `unverified()` is `simulator-only` only:
   `hardware-contradicted` ones were checked, and `doctor` lists them apart
+- `src/harmony_mcp/channels.py`: what a channel is (digits, at most one `-` or `.`, or a favorite's name) and
+  the favorite lookup; pure functions. Favorites live per hub in `config.json` `channels` (`HubSettings.channels`)
 - `src/harmony_mcp/limits.py`: this server's rate-limit numbers and per-call caps (the mechanism,
   `TokenBucket` and `refusal`, is shared `ratelimit.py`)
 - **Shared with the siblings; the source of truth is mcp-server-shared.** `src/harmony_mcp/remote.py`,
@@ -56,7 +58,7 @@ explain the reasoning behind non-obvious changes instead of only making them.
   layout as mcp-server-webos's, so both can share an LXC
 - `tests/`: `conftest.py` (`FakeHarmonyAPI` per hub for fast unit tests, fixtures loaded from the
   package; "Listen to Music" is on both hubs on purpose), `test_contract` (real aioharmony vs the
-  fake hub over sockets), `test_catalog`, `test_config`, `test_client`, `test_tools` (in-process
+  fake hub over sockets), `test_catalog`, `test_channels`, `test_config`, `test_client`, `test_tools` (in-process
   MCP `Client`), `test_multi_hub`, `test_safety`, `test_tooling`, `test_recorded` (replays
   `doctor --dump` captures), `test_assumptions`, `test_cli`, `test_stdio`, `test_remote`,
   `test_logsafe`, `test_tasks`, `test_export`,
@@ -66,7 +68,8 @@ explain the reasoning behind non-obvious changes instead of only making them.
 
 - **The hub's config is the allow-list.** Every activity, device and command name is resolved
   through `Catalog`; a tool argument never becomes a device id or command string directly. No
-  raw IR, no `change_channel`, no `sync` (it talks to Logitech's cloud). Widen deliberately and
+  raw IR, no `change_channel` (`harmony_tune_channel` presses the digit commands the config lists instead,
+  ASSUMPTION H-DIGITS), no `sync` (it talks to Logitech's cloud). Widen deliberately and
   update README and tests together.
 - **Multiple hubs: never guess.** Every action tool takes an optional `hub`. Without it, act
   only when exactly one hub matches (the name, or the running activity); otherwise raise an
@@ -89,6 +92,10 @@ explain the reasoning behind non-obvious changes instead of only making them.
   unreachable is retried for `sleep_retry_window`, then recorded as failed with the reason. The hub going
   off drops it (`_drop_timer_if_off`), an activity switch does not, and the timer's own power off must not
   drop itself (`firing`). Tests shrink `sleep_unit`, `sleep_retry_window` and `sleep_retry_delay`.
+- Several presses that make one action (a channel number) go through `HubClient.send_sequence`: one busy
+  check, one rate-limit charge refused whole, one dry-run report. Don't loop over `send`.
+- `catalog.find_command` tries the exact name, then the exact label, before the normalised match, and never
+  matches on an empty key: `norm("-")` and `norm(".")` are both `""`.
 - Raise `HarmonyError` (a `ToolError`) for anything the model or user can act on.
 - **Don't invent protocol details.** Anything not confirmed on hardware is an `Assumption`, cited
   as `# ASSUMPTION <id>` where code depends on it, in README's table and HARDWARE_VALIDATION.md.
