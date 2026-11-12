@@ -37,3 +37,8 @@ MAX_CHANNEL_DIGITS = 6
 MAX_SEQUENCE = MAX_CHANNEL_DIGITS + 2
 # The channel argument also takes a favorite's name, which is longer than a number.
 MAX_CHANNEL_ARG = 40
+
+# Activity history (history.py): events kept in memory and in the file. A household makes a few changes
+# a day, so this is months. The file is rewritten down to the cap only once it is SLACK lines over it.
+HISTORY_MAX_EVENTS = 1000
+HISTORY_FILE_SLACK = 250

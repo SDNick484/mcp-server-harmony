@@ -22,7 +22,7 @@ import contextlib
 import logging
 import math
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
@@ -35,6 +35,7 @@ from typing_extensions import TypedDict
 
 from .catalog import POWER_OFF_ID, Activity, Catalog, Command, norm
 from .config import HubSettings, Protocol
+from .history import History, Source
 from .limits import (
     ACTIVITY_CAPACITY,
     ACTIVITY_RATE,
@@ -174,6 +175,7 @@ class HubClient:
         api_factory: ApiFactory = HarmonyAPI,
         *,
         dry_run: bool = False,
+        history: History | None = None,
     ) -> None:
         self.hub = hub
         self.protocol = protocol
@@ -202,6 +204,17 @@ class HubClient:
         # off after a restart, long after anyone remembers asking, is worse than a timer that is lost.
         self._timer: _SleepTimer | None = None
         self.sleep_last: SleepTimerEnd | None = None
+        # Activity history (history.py). Every change of activity_id goes through _set_activity, so the
+        # pushed callback and our own bookkeeping after a start can't record the same change twice.
+        self.history = history
+        self._baselined = False  # the first state read since startup is a baseline, not a change
+        # The activity a start or power off *we* sent is heading for, while it waits for the hub. A pushed
+        # change to that activity during the wait is ours; any other push is from elsewhere. Set rather
+        # than compared afterwards, so it doesn't matter whether the push or the reply arrives first.
+        self._own_target: int | None = None
+        # >0 while state is being re-read (after a reconnect, or by ping): a change found then happened
+        # at an unknown time, so its record says it was noticed late.
+        self._noticing = 0
 
     # --- lifecycle -----------------------------------------------------------
     @property
@@ -306,7 +319,9 @@ class HubClient:
 
         self._api = api
         self.catalog = Catalog.from_config(api.config)
-        self.activity_id = api.current_activity[0]
+        # Normally the baseline. If the connection task crashed and restarted after that, whatever the
+        # hub is running now was found by re-reading, not seen happening.
+        self._set_activity(api.current_activity[0], late=True)
         self.available = True
         self.last_connected_at = time.monotonic()
         self.tried.set()
@@ -340,7 +355,8 @@ class HubClient:
         try:
             async with asyncio.timeout(timeout):
                 if (inner := getattr(self._api, "_harmony_client", None)) is not None:
-                    await inner.refresh_info_from_hub()
+                    with self._noticing_late():
+                        await inner.refresh_info_from_hub()
                 if self._api is None or self._api.current_activity is None:
                     return False
                 return bool(self.available)
@@ -377,12 +393,13 @@ class HubClient:
         if inner is None:
             return
         try:
-            await inner.refresh_info_from_hub()
+            with self._noticing_late():
+                await inner.refresh_info_from_hub()
         except Exception as exc:  # the next reconnect or notification will try again
             log.warning("%s: couldn't refresh state after reconnecting: %s", self.name, exc)
             return
         self.catalog = Catalog.from_config(self._api.config)
-        self.activity_id = self._api.current_activity[0]
+        self._set_activity(self._api.current_activity[0], late=True)
         self.starting_id = None
         self._drop_timer_if_off()
         log.info("%s: state refreshed after reconnect", self.name)
@@ -394,13 +411,42 @@ class HubClient:
         self.starting_id = activity[0]
 
     def _on_activity(self, activity: tuple[int | None, str | None]) -> None:
-        self.activity_id = activity[0]
+        # ASSUMPTION H-ACTIVITY-PUSH: a change made elsewhere arrives here unasked. ASSUMPTION H-OFF-PUSH: so does
+        # a power off, as activity -1.
+        # Ours if it is the activity a start/power off of ours is waiting on; otherwise someone else's
+        # (the remote, the Harmony app, Home Assistant): the push doesn't say who asked.
+        source: Source = "this_server" if activity[0] == self._own_target else "elsewhere"
+        self._set_activity(activity[0], source=source)
         self.starting_id = None
         self._drop_timer_if_off()
 
     def _on_config(self, config: dict[str, Any]) -> None:
         self.catalog = Catalog.from_config(config)
         log.info("%s: config changed; reloaded %d activities", self.name, len(self.catalog.activities))
+
+    # --- history -------------------------------------------------------------
+    @contextlib.contextmanager
+    def _noticing_late(self) -> Iterator[None]:
+        self._noticing += 1
+        try:
+            yield
+        finally:
+            self._noticing -= 1
+
+    def _set_activity(self, activity_id: int | None, *, source: Source = "elsewhere", late: bool = False) -> None:
+        """The one place activity_id changes, so each change is recorded once.
+
+        ``late``: this state came from re-reading, not from a push, so the change happened at an unknown time.
+        """
+        self.activity_id = activity_id
+        if self.history is None or activity_id is None:
+            return
+        state = None if activity_id == POWER_OFF_ID else self._name(activity_id)
+        if not self._baselined:
+            self._baselined = True
+            self.history.baseline(self.name, state)
+        else:
+            self.history.change(self.name, state, source, noticed_late=late or self._noticing > 0)
 
     # --- commands ------------------------------------------------------------
     def _require(self) -> Any:
@@ -469,6 +515,7 @@ class HubClient:
             return Outcome(changed=False, dry_run=True, sent=sent)
         self._runs += 1
         run = self._runs
+        self._own_target = activity_id
         try:
             async with asyncio.timeout(self.activity_timeout):
                 ok, msg = await api.start_activity(activity_id)
@@ -477,6 +524,10 @@ class HubClient:
                 f"{self.name} didn't finish '{what}' within {self.activity_timeout:.0f}s. It may still be running; "
                 "check get_status before retrying."
             ) from exc
+        finally:
+            # Only if no later run has taken the marker over (a forced power off overtaking this start).
+            if run == self._runs:
+                self._own_target = None
         if run != self._runs:
             # A later run (a forced power off) was sent while this one waited. Its state is the truth; ours
             # would put back an activity the hub has since turned off.
@@ -485,7 +536,7 @@ class HubClient:
             raise HarmonyError(f"{self.name} refused '{what}': {msg or 'no reason given'}")
         # The pushed "new activity" normally arrives before start_activity
         # returns, but don't depend on callback ordering for our own state.
-        self.activity_id = activity_id
+        self._set_activity(activity_id, source="this_server")
         self.starting_id = None
         self._drop_timer_if_off()
         return Outcome(changed=True, sent=sent)

@@ -200,6 +200,7 @@ and an MCP call over HTTP reaching a simulated hub.
 | `HARMONY_CONFIG_DIR`     | `$XDG_CONFIG_HOME/mcp-server-harmony` | Where `config.json` lives                                       |
 | `HARMONY_DRY_RUN`        | off                                   | Read the hubs, send nothing that changes anything (`serve --dry-run` too) |
 | `HARMONY_LOG_UNREDACTED` | off                                   | Don't mask IPs and MACs in logs (`--no-redact`); secrets stay masked |
+| `HARMONY_HISTORY`        | on                                    | `off` stops recording activity changes (see Activity history); beats `"history"` in `config.json` |
 
 `config.json` (written by `check`, safe to edit by hand):
 
@@ -217,7 +218,7 @@ call a hub something else; `check` fills in missing names but never replaces one
 answers to its address. Optionally add `"protocol": "WEBSOCKETS"` (or `"XMPP"`) to skip the
 transport race. `HARMONY_HOST` (one hub) and the older `{"host": ...}` form still work.
 Problems (a host with a port, duplicate hosts or names, invalid JSON) are reported by name at
-startup and by `doctor`.
+startup and by `doctor`. `"history": false` turns off the activity history (or `HARMONY_HISTORY=off`).
 
 **Channel favorites.** A hub may also have a `channels` map, a name for each channel number
 `harmony_tune_channel` can press (lineups differ per TV provider, so they belong to a hub):
@@ -244,6 +245,7 @@ like any other config problem. `check` keeps the map when it rewrites the file, 
 | `harmony_describe_activity` | Read-only: the devices an activity involves with expected power (on/off/unknown) and input, and which device gets each button group |
 | `harmony_set_sleep_timer` | Turn a hub's TV system off in 1-720 minutes (`minutes`; 0 cancels); a new one replaces the old; see [Sleep timer](#sleep-timer) |
 | `harmony_tune_channel`    | Press a channel number (`702`, `5.1`, `5-1`) or a favorite's name as one digit sequence; `enter` adds a select press |
+| `harmony_get_history`     | What each hub's activity changed from and to, and when, newest first (or `after_seq` to catch up) |
 
 Every tool except `harmony_get_status` takes an optional `hub`. Actions return
 `{hub, outcome: done | unchanged | dry_run | error, detail, sent}`, where `sent` lists the frames
@@ -300,6 +302,27 @@ Two hubs that both have "Listen to Music". (Output from `simulate`, trimmed.)
                {"hub": "Den", "outcome": "done", "detail": "Power off Den", ...}]}
 ```
 
+### Activity history
+
+`harmony_get_history(hub, limit, after_seq)` answers "what was on at 9 last night?", "how long was the
+office TV on today?" and "did someone turn the bedroom TV on from the remote?". The hub pushes every
+activity change over the websocket this server already holds open, including ones made with the
+physical remote or the Harmony app, and the server keeps them. It is the counterpart of
+`sofabaton_get_recent_presses`: newest first, or oldest first after `after_seq`, with `last_seq` to
+poll from.
+
+Each change records when (UTC), the hub, what it changed from and to (`null` is everything off), how
+long the previous state lasted, and where it came from. `source` is `this_server` for a start or power
+off this server sent and `elsewhere` for everything else (the remote, the Harmony app, Home
+Assistant); the hub doesn't say who asked, so those three can't be told apart. A change found only by
+re-reading the state after a reconnect is marked `noticed_late`: it happened at an unknown time while
+the socket was down, and `at` is when it was noticed.
+
+The first state read after the server starts is not a change. It is recorded as `recording_started`
+with that state, so a gap reads as "not recorded" and not "nothing happened". Over stdio the server
+only runs while the MCP client does, so those gaps are normal. `previous_lasted_at_least` is true when
+the previous state began before recording did, so its duration is a minimum.
+
 ## Safety design
 
 - **The hub's own config is the allow-list.** Activity, device and command names are resolved
@@ -324,6 +347,16 @@ Two hubs that both have "Listen to Music". (Output from `simulate`, trimmed.)
   second; 4 activity changes in a burst, then one per 15 s. A call over the limit is refused
   whole, never half-sent. A channel number is one sequence of up to 8 presses, 400 ms apart, charged
   and refused as a whole.
+- **Activity history is a record of viewing habits, kept on your own disk.** It stores, per change: the
+  time, the hub's name, the activity names before and after, how long the previous one lasted, and
+  whether this server or something else caused it. No addresses (a hub known only by its address is
+  stored masked, `x.x.x.20`), no commands, no device names. It is held in memory (the newest 1000
+  events) and appended to `history.jsonl` in the config directory (`HARMONY_CONFIG_DIR`, by default
+  `~/.config/mcp-server-harmony`), which is created readable by you only (mode 0600) and trimmed to
+  the newest events. To turn it off, set `HARMONY_HISTORY=off` or `"history": false` in
+  `config.json`: nothing is then recorded, in memory or on disk, and `harmony_get_history` says so.
+  To forget what was kept, delete the file. If the file can't be written (a read-only disk), that is
+  logged once and history carries on in memory.
 - **Dry run.** `serve --dry-run` (or `call --dry-run`) reads the hubs and reports what it
   would send.
 - **Resilient.** Each hub reconnects with backoff, and re-reads its state after a reconnect. If the
@@ -408,6 +441,8 @@ simulator only:
 | `H-TIMING`         | low        | simulator-only |
 | `H-FIXIT`          | medium     | simulator-only |
 | `H-DIGITS`         | medium     | simulator-only |
+| `H-ACTIVITY-PUSH`  | medium     | hardware-verified |
+| `H-OFF-PUSH`       | low        | simulator-only |
 
 "High" means aioharmony itself depends on it, and Home Assistant's Harmony integration runs on
 aioharmony. `test_assumptions.py` fails if this table and `assumptions.py` disagree.

@@ -379,6 +379,35 @@ Confirms: **H-DIGITS** (record the timing and separator behavior in `note`).
 
 ---
 
+## 13. With Claude: activity history
+
+Needs a long-running server (Claude Code or Claude Desktop, as in step 9) and one hub with a physical
+remote. History is on by default and writes `history.jsonl` in the config directory
+(`~/.config/mcp-server-harmony/` unless `HARMONY_CONFIG_DIR` is set).
+
+1. Start the server fresh (restart the MCP client, or `claude mcp remove` and add again). Ask:
+   *"Show the activity history."* There should be one `recording_started` event per connected hub, with
+   `source: null` and the state each hub was in. Check `ls -l` on `history.jsonl`: mode `-rw-------`.
+2. **From the physical remote.** Start an activity with the remote's own button, wait for the TV, and ask
+   again. A `change` event should appear with `source: "elsewhere"`, the right `to_activity`, and
+   `previous_lasted_at_least: true` (the previous state began before recording).
+3. **From Claude.** Ask Claude to start a different activity on that hub. The event should say
+   `source: "this_server"`, and there must be exactly one event for it, not two.
+4. **Power off from the Harmony app.** Turn the hub's activity off from the app (or the remote's Off
+   button). Expect a `change` with `to_activity: null` and `source: "elsewhere"`.
+5. **Restart and survive.** Restart the server. Ask for the history: the events from steps 1 to 4 are
+   still there, in order, followed by a new `recording_started` per hub. Anything done while the server
+   was stopped is not there, which is the point of the marker.
+6. **Reconnect.** Unplug a hub whose activity is running, change its activity from the remote (or turn it
+   off), plug it back in and wait a minute. Expect a `change` with `noticed_late: true` whose `at` is when
+   the server noticed. (This is also the step that finishes `H-RECONNECT`'s re-read.)
+7. **Off.** Set `HARMONY_HISTORY=off`, restart, ask: `enabled: false` and a `hint`, and no new lines in the
+   file.
+
+Confirms: **H-ACTIVITY-PUSH** (steps 2 and 3, with no call from us), **H-OFF-PUSH** (step 4).
+
+---
+
 ## Which step confirms what
 
 | Assumption         | Step | Confidence before | Notes                                                     |
@@ -400,6 +429,8 @@ Confirms: **H-DIGITS** (record the timing and separator behavior in `note`).
 | `H-TIMING`         | 5    | low               |                                                           |
 | `H-FIXIT`          | 10   | medium            | shape from published dumps of older firmware; compare with the Harmony app |
 | `H-DIGITS`         | 12   | medium            | names and routing read 2026-11-12; that the presses tune a channel is untried |
+| `H-ACTIVITY-PUSH`  | 13   | medium            | **verified 2026-11-04** for starts from the remote (state followed with no call from us); step 13 re-checks it with history |
+| `H-OFF-PUSH`       | 13   | low               | a power off from the app or remote, step 13.4             |
 
 ## What to send back if something fails
 

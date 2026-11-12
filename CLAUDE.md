@@ -37,6 +37,12 @@ explain the reasoning behind non-obvious changes instead of only making them.
   `hardware-contradicted` ones were checked, and `doctor` lists them apart
 - `src/harmony_mcp/channels.py`: what a channel is (digits, at most one `-` or `.`, or a favorite's name) and
   the favorite lookup; pure functions. Favorites live per hub in `config.json` `channels` (`HubSettings.channels`)
+- `src/harmony_mcp/history.py`: `History`, the record of activity changes (per hub; memory plus a capped,
+  owner-only `history.jsonl` in the config dir; off with `HARMONY_HISTORY=off` / `"history": false`). Every
+  change of `HubClient.activity_id` goes through `HubClient._set_activity`, the one place it is recorded, so
+  the pushed callback and `_run_activity` can't record it twice; `_own_target` marks a change as
+  `this_server`. A baseline (first read after startup) is `recording_started`, not a change. Names only, never
+  an address; a write failure is logged once and never breaks anything
 - `src/harmony_mcp/limits.py`: this server's rate-limit numbers and per-call caps (the mechanism,
   `TokenBucket` and `refusal`, is shared `ratelimit.py`)
 - **Shared with the siblings; the source of truth is mcp-server-shared.** `src/harmony_mcp/remote.py`,
@@ -60,7 +66,8 @@ explain the reasoning behind non-obvious changes instead of only making them.
   package; "Listen to Music" is on both hubs on purpose), `test_contract` (real aioharmony vs the
   fake hub over sockets), `test_catalog`, `test_channels`, `test_config`, `test_client`, `test_tools` (in-process
   MCP `Client`), `test_multi_hub`, `test_safety`, `test_tooling`, `test_recorded` (replays
-  `doctor --dump` captures), `test_assumptions`, `test_cli`, `test_stdio`, `test_remote`,
+  `doctor --dump` captures), `test_assumptions`, `test_history` (injected clock; the file
+  round trip, cap, off switch), `test_cli`, `test_stdio`, `test_remote`,
   `test_logsafe`, `test_tasks`, `test_export`,
   `test_sleep_timer`. Async tests use anyio's plugin.
 

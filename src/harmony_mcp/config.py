@@ -81,6 +81,9 @@ class Settings:
     # Read the hubs for real, but send nothing that changes anything; every
     # write reports what it would have sent (HARMONY_DRY_RUN=1, serve --dry-run).
     dry_run: bool = False
+    # Record activity changes (history.py), in memory and in history.jsonl in the config directory.
+    # HARMONY_HISTORY=off or "history": false in config.json turns it off.
+    history: bool = True
     # Problems found while loading, as sentences; logged at startup and shown by `doctor`.
     problems: tuple[str, ...] = ()
 
@@ -91,6 +94,26 @@ class Settings:
 
 def _flag(value: str | None) -> bool:
     return (value or "").strip().lower() in ("1", "true", "yes", "on")
+
+
+_OFF = ("0", "false", "no", "off")
+_ON = ("1", "true", "yes", "on")
+
+
+def _history_enabled(env: str | None, data: dict[str, Any], problems: list[str]) -> bool:
+    """HARMONY_HISTORY wins over config.json's "history"; the default is on."""
+    if env is not None and env.strip():
+        word = env.strip().lower()
+        if word in _OFF:
+            return False
+        if word in _ON:
+            return True
+        problems.append(f"ignoring HARMONY_HISTORY={env!r}: expected on or off")
+    value = data.get("history")
+    if value is None or isinstance(value, bool):
+        return value is not False
+    problems.append(f"ignoring history {value!r} in config.json: expected true or false")
+    return True
 
 
 def _host_problem(host: str) -> str | None:
@@ -227,6 +250,7 @@ def load_settings() -> Settings:
         protocol=protocol,
         port=port,
         dry_run=_flag(os.environ.get("HARMONY_DRY_RUN")),
+        history=_history_enabled(os.environ.get("HARMONY_HISTORY"), data, problems),
         problems=tuple(problems),
     )
 

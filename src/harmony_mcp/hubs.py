@@ -32,7 +32,8 @@ from aioharmony.harmonyapi import HarmonyAPI
 from .catalog import Activity, Command, Device
 from .channels import favorite
 from .client import ApiFactory, HarmonyError, HubClient
-from .config import Settings
+from .config import Settings, config_dir
+from .history import HISTORY_FILE, History
 
 T = TypeVar("T")
 log = logging.getLogger(__name__)
@@ -61,10 +62,21 @@ class HubRegistry:
     # once; later calls never wait, so a hub that drops is reported at once.
     startup_grace = 5.0
 
-    def __init__(self, settings: Settings, api_factory: ApiFactory = HarmonyAPI) -> None:
+    def __init__(
+        self, settings: Settings, api_factory: ApiFactory = HarmonyAPI, history: History | None = None
+    ) -> None:
         self.settings = settings
+        # One record for every hub (history.py). Tests pass their own, with a fake clock and a temp file.
+        self.history = (
+            history
+            if history is not None
+            else History(config_dir() / HISTORY_FILE if settings.history else None, enabled=settings.history)
+        )
         self._ready_checked = False
-        self.hubs = [HubClient(h, settings.protocol, api_factory, dry_run=settings.dry_run) for h in settings.hubs]
+        self.hubs = [
+            HubClient(h, settings.protocol, api_factory, dry_run=settings.dry_run, history=self.history)
+            for h in settings.hubs
+        ]
         if settings.port is not None:
             # aioharmony has one module-level port for every hub (ASSUMPTION
             # H-PORT); only the simulator ever needs another one.
