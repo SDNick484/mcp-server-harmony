@@ -44,7 +44,25 @@ from .registry import doctor_summary
 # e-mail address embedded in the middle of it (seen in a published dump), where neither a key
 # match nor logsafe's e-mail pattern (which wants the address to stand alone) would catch it.
 # "household": content.householdUserProfileUri, already caught by "user", named for clarity.
-_PRIVATE_KEYS = ("email", "account", "token", "password", "user", "username", "timestamphash", "household")
+# The last four are not the account itself but ids unique to one owner's hubs and Harmony setup, which a
+# real 4.15.600 dump carried (2026-11-12): "uuid" (hub and entity ids), "setupsession" (the app session that
+# configured the hub), "hubid" and "remoteid" (Logitech's cloud ids; covers activeRemoteId too). Masking
+# them costs nothing: the recorded replay reads only `config` and `name`, and `doctor` reads
+# activeRemoteId from the live reply before scrub ever sees it.
+_PRIVATE_KEYS = (
+    "email",
+    "account",
+    "token",
+    "password",
+    "user",
+    "username",
+    "timestamphash",
+    "household",
+    "uuid",
+    "setupsession",
+    "hubid",
+    "remoteid",
+)
 # Anything shaped like an address *inside* a longer string, for values under keys we don't know about.
 _EMBEDDED_EMAIL = re.compile(r"[A-Za-z0-9._%+-]@[A-Za-z0-9-]+\.[A-Za-z]{2,}")
 
