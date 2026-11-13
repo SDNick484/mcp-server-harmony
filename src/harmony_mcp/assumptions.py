@@ -36,6 +36,10 @@ __all__ = ["ASSUMPTIONS", "BY_ID", "Assumption", "contradicted", "doctor_lines",
 # Hardware runs, cited by the notes below.
 _HW_2026_10_14 = "2026-10-14, two real hubs (Harmony Hub, Office Hub, firmware 4.15.600) via the service on LXC210"
 _HW_2026_11_12 = "2026-11-12, Office Hub and Bedroom Hub (firmware 4.15.600), config read through this server"
+_HW_2026_11_12_LIVE = (
+    "2026-11-12, Office Hub and Bedroom Hub (firmware 4.15.600) driven through this server from a Claude session, "
+    "with the owner at the TVs and the Harmony app; the Alpine service host for the history file"
+)
 _HW_2026_11_04 = (
     "2026-11-04, Office Hub and Bedroom Hub (firmware 4.15.600) driven through this server from a Claude session"
 )
@@ -73,10 +77,12 @@ ASSUMPTIONS: tuple[Assumption, ...] = (
         "function's action is a JSON *string* holding command and deviceId.",
         "aioharmony json_config and _get_config",
         "high",
+        status="hardware-verified",
         note="Partial, " + _HW_2026_10_14 + ": the running activity's id (32845636) resolved to its name "
         "through the parsed config. Also partial, " + _HW_2026_11_04 + ": commands resolved through the running "
         "activity's control groups and straight to named devices (an LG TV and an Onkyo receiver) and were "
-        "accepted. Not replayed with `doctor --dump` and test_recorded, which is the step this needs.",
+        "accepted. Also, " + _HW_2026_11_12_LIVE + ": `doctor --dump` captures of both hubs (the first from "
+        "firmware 4.15.600) are in tests/fixtures/recorded/ and replay through test_recorded.",
     ),
     Assumption(
         "H-POWEROFF",
@@ -163,7 +169,9 @@ ASSUMPTIONS: tuple[Assumption, ...] = (
         "after it was plugged back in, with no restart of this server. Not shown: the re-read after a reconnect "
         "(the hub was off throughout, so no state changed while it was away), the 1 s to 30 s retry timing, and "
         "the callbacks themselves. The Office Hub stayed reachable throughout and showed an activity started "
-        "from its remote.",
+        "from its remote. Also, " + _HW_2026_11_12_LIVE + ": one history event arrived with noticed_late set "
+        "although nobody unplugged a hub (cause unknown), so a late notice can happen, but it was not a "
+        "controlled test. The re-read after a reconnect is still unexercised.",
     ),
     Assumption(
         "H-SSDP",
@@ -178,10 +186,15 @@ ASSUMPTIONS: tuple[Assumption, ...] = (
         "channel.",
         "how a physical remote works; the command names and an activity's routing of them were read from the hubs",
         "medium",
-        note="Partial, " + _HW_2026_11_12 + ": the LG TVs have '0' to '9' and '-' in NumericBasic (one also "
-        "'.'), and the Bedroom Hub's 'Bedroom TV' activity routes them to the TV. Never tried: that pressing "
-        "them tunes a channel, the 400 ms gap between digits, the separator, and the select button that "
-        "ends the entry (OK, label Select, on the LG TVs; Enter on the Onkyo).",
+        status="hardware-verified",
+        note=_HW_2026_11_12 + ": the LG TVs have '0' to '9' and '-' in NumericBasic (one also '.'), and the "
+        "Bedroom Hub's 'Bedroom TV' activity routes them to the TV. Then " + _HW_2026_11_12_LIVE + ", on the "
+        "Office Hub's LG only: the digits reached the TV whole at the 400 ms gap (its entry screen echoed "
+        "5.1 and 5-1 as sent), the LG took '.' and '-' as the same sub-channel separator (both went from LG "
+        "Channels to DTV 5-1), and '7' then OK (the select button) tuned channel 7 on LG Channels. Limits: a "
+        "single digit without OK was inconsistent and unexplained (5 did nothing, 7 sometimes did not change "
+        "the channel), the TV had no antenna signal, the fallback from '.' to '-' was not exercised, and the "
+        "Bedroom Hub, favorites and any set-top box were not tried.",
     ),
     Assumption(
         "H-TIMING",
@@ -199,8 +212,16 @@ ASSUMPTIONS: tuple[Assumption, ...] = (
         "unit/harmony.json, jfkriz/alexa-harmony-device-control controller.json, rkokkelk/com.jreenen.homeyharmonyhub "
         "example_json/activity.json; and the Fixit class of digitaldan/harmony-client (the library openHAB's "
         "Harmony binding uses) maps id, Power, Input, isAlwaysOn and isRelativePower. Those dumps are from older "
-        "firmware; firmware 4.15.600 is unchecked",
+        "firmware; firmware 4.15.600 was unchecked until 2026-11-12",
         "medium",
+        status="hardware-verified",
+        note=_HW_2026_11_12_LIVE + ": both hubs' configs on 4.15.600 carry fixit on every activity, keyed by "
+        "device id with Power and Input as described. describe_activity's expected power and input for "
+        "Bedroom TV (Bedroom Hub) and Watch Office TV (Office Hub) matched the Harmony app (owner "
+        "confirmed), and on the Office Hub the Onkyo (input tv) and the LG (Smart TV home) were found "
+        "as fixit says. Open: on the Bedroom Hub the LG sat on HDMI 1 where fixit says Smart TV. fixit is "
+        "the expected state in the config, not proof that the hub switches the input, so this is not "
+        "counted as a contradiction. Only two activities were compared, not all nine.",
     ),
     Assumption(
         "H-ACTIVITY-PUSH",
@@ -214,7 +235,10 @@ ASSUMPTIONS: tuple[Assumption, ...] = (
         "remotes (Office Xbox, then PS5; SHIELD TV) and get_status, which only reads the state we cache, showed "
         "them with no call from us to the hub, so they arrived as pushes. Starts only: a power off from the "
         "remote or app is H-OFF-PUSH. The frames and their timing were not captured (no -v log), so how soon "
-        "after the change the push arrives, which `at` depends on, is unmeasured.",
+        "after the change the push arrives, which `at` depends on, is unmeasured. Again, "
+        + _HW_2026_11_12_LIVE
+        + ": starts made with Alexa were followed with no call from us, and a start through this server gave "
+        "exactly one history event.",
     ),
     Assumption(
         "H-OFF-PUSH",
@@ -222,6 +246,10 @@ ASSUMPTIONS: tuple[Assumption, ...] = (
         "activity id -1, so history records it as a change to off.",
         "none: inferred from -1 being the PowerOff activity (H-POWEROFF) and H-ACTIVITY-PUSH",
         "low",
+        status="hardware-verified",
+        note=_HW_2026_11_12_LIVE + ": a power off from the Harmony app was recorded as a change with "
+        "to_activity null and source 'elsewhere', and an app power off also dropped a pending sleep timer. "
+        "Not tried: the remote's own Off button. The frames and their timing were not captured.",
     ),
 )
 

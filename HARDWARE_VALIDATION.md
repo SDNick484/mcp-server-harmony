@@ -324,6 +324,24 @@ compare:
 
 Confirms: **H-FIXIT**.
 
+**Observed (2026-11-12, Office Hub and Bedroom Hub on firmware 4.15.600, through the server from a Claude
+session; the owner read the Harmony app).**
+
+- **Shape: present and matching on both hubs.** Every activity in the two real `doctor --dump` captures has a
+  `fixit` object keyed by device id, with `Power` and (for the devices it switches) `Input`, as the older
+  published dumps showed. The captures are now in `tests/fixtures/recorded/` and replay through
+  `test_recorded` (this is also the replay `H-CONFIG-SHAPE` was waiting for). They exposed a scrub gap: the
+  dumps carry `uuid`, `setupSession`, `hubId` and `remoteId` values, which `doctor`'s scrub did not mask. That is
+  fixed (with a test) before anything was committed; see CHANGELOG.
+- **Compared with the app.** Bedroom Hub, "Bedroom TV", and Office Hub, "Watch Office TV": the devices
+  `describe_activity` lists as on, and the ones it lists as off, are the ones the app shows. The owner confirmed both.
+- **Against the real devices (not only the app).** Office Hub: after starting "Watch Office TV" the Onkyo
+  server reported input `tv` and the WebOS server reported the LG on its Smart TV home screen, which is what
+  `fixit` says. Bedroom Hub: the LG's input was HDMI 1 while `fixit` says Smart TV. Not resolved: `fixit` is
+  the activity's expected state in the hub's config, and the hub is not promised to switch an input that way,
+  so this is recorded as an open observation, not a contradiction.
+- Not recorded here: the export files' mode (600) and the `@` grep were not re-checked in this run.
+
 ## 11. Sleep timer
 
 No new assumption: the timer only calls the power off that step 8 already covers. This checks the
@@ -343,6 +361,23 @@ must stay running while the timer counts down; a `call` exits first and takes th
    Status should show `retrying: "... is busy ..."` and the TV should turn off once the sequence ends.
 
 Confirms nothing new, but record what the two-minute timer did here.
+
+**Observed (2026-11-12, Office Hub and Bedroom Hub, through the server from a Claude session).**
+
+- **Fires.** Three timers (two on the Office Hub, one on the Bedroom Hub) each turned the hub off about 3 s
+  after `fires_at`. Afterwards `sleep_timer` was null, `last_sleep_timer` was `fired` and `power` was off.
+- **An activity switch keeps it.** Switching activities on the same hub left `sleep_timer` in place, as the
+  step says (checked from the Harmony view of what was running).
+- **Cancel.** `minutes=0` gave `last_sleep_timer: cancelled` and the TV stayed on.
+- **Dropped when the hub goes off.** A `power_off` through the server dropped it, and so did a power off from
+  the Harmony app: `last_sleep_timer` was `cancelled` with the reason "powered off before the timer fired, so it
+  was dropped".
+- **Not run:** the optional busy retry (item 6).
+- **Unexplained, once.** On the Office Hub, "Watch Office TV" was started about 45 s after a power off and then
+  switched away 9 s later. Harmony reported the activity running but the Onkyo and the LG never came on (the
+  owner saw it, and the device servers agreed). A later start from a settled state worked, and an Alexa start
+  33 s after an off also worked, so "too soon after a power off" does not explain it. Not reproduced, and not
+  called a bug in this server; recorded in case it comes back.
 
 ## 12. Tune a channel
 
@@ -377,6 +412,24 @@ buttons and suggesting a device that has them; nothing is sent. With favorites i
 
 Confirms: **H-DIGITS** (record the timing and separator behavior in `note`).
 
+**Observed (2026-11-12, Office Hub only: its LG TV, on LG Channels and on the TV's own tuner; the owner
+watched the TV).** The Bedroom Hub was not tested in this session. There is no antenna signal at the Office TV: what it shows is
+LG Channels (IPTV, which has real channel numbers), and the DTV tuner only showed its `5-1` entry screen.
+
+- **Digits arrive intact at 400 ms.** The LG's on-screen entry echoed what was sent: `5.1` showed as `5.1`
+  and `5-1` as `5-1`, nothing lost or merged. So `DIGIT_GAP_MS` is long enough for this TV (shorter was not tried).
+- **Separators.** The LG treated `.` and `-` as the same sub-channel separator. `5.1` took the TV from LG
+  Channels to DTV `5-1`, and `5-1` did the same. The `5.1` to `-` fallback was not exercised, because the
+  Office activity has both buttons.
+- **A channel number tunes, sometimes.** `7` followed by `OK` tuned channel 7 on LG Channels. Single digits
+  alone were inconsistent: one `7` changed the channel, and later ones showed the channel list without
+  changing it, including after the IPTV app was started directly. `5` alone did nothing. Not explained.
+  `OK` worked as the confirm after `7`.
+- **Refusal.** On an activity with no digit buttons, `tune_channel` failed naming the missing buttons and
+  suggesting a device that has them; nothing was sent.
+- **Not run:** favorites (`"channels"` in `config.json`), the Bedroom Hub, and any set-top box. Whether `tune_channel` keeps its fallback
+  from `5.1` to `-` on a TV that lacks the typed separator is left to the owner.
+
 ---
 
 ## 13. With Claude: activity history
@@ -406,6 +459,23 @@ remote. History is on by default and writes `history.jsonl` in the config direct
 
 Confirms: **H-ACTIVITY-PUSH** (steps 2 and 3, with no call from us), **H-OFF-PUSH** (step 4).
 
+**Observed (2026-11-12, Office Hub and Bedroom Hub, through the server, which ran as the `serve --http`
+service on the Alpine host; items 2 and 6 not run as written).**
+
+- **Item 1, baseline.** Each connected hub had one `recording_started` with `source: null`. `history.jsonl`
+  was mode `-rw-------`, owned by the service user, and held no IP or MAC address.
+- **Item 2, from the remote: not run.** Starts from outside Claude were made with Alexa, which goes through
+  the hub the same way, so those were followed with no call from us (`source: elsewhere`). That is not the
+  remote's own button; do that one to close the item.
+- **Item 3, from Claude.** A start through the server gave `source: this_server` and exactly one event.
+- **Item 4, power off from the Harmony app.** One `change` with `to_activity: null` and `source: elsewhere`.
+- **Item 5, restart.** After a restart of the service the earlier events were still there, in order, followed
+  by a new `recording_started` per hub.
+- **Item 6, reconnect: not run as written.** No hub was unplugged. One `noticed_late` event did appear on its
+  own (the cause is not known), so the field works; the unplug test is still open for `H-RECONNECT`.
+- **Item 7, off.** With `HARMONY_HISTORY=off` in the service's env file and a restart, the history call gave
+  `enabled: false` and a `hint`, and the file gained no lines. The setting was then removed and the service restarted.
+
 ---
 
 ## Which step confirms what
@@ -415,7 +485,7 @@ Confirms: **H-ACTIVITY-PUSH** (steps 2 and 3, with no call from us), **H-OFF-PUS
 | `H-PORT`           | 2    | high              |                                                           |
 | `H-PROVISION`      | 2    | high              |                                                           |
 | `H-FRAMES`         | 3    | high              |                                                           |
-| `H-CONFIG-SHAPE`   | 3    | high              | via `test_recorded`; commands resolved on hardware 2026-11-04, replay still to do |
+| `H-CONFIG-SHAPE`   | 3    | high              | via `test_recorded`; commands resolved on hardware 2026-11-04; two real 4.15.600 captures replayed 2026-11-12 |
 | `H-POWEROFF`       | 8    | high              |                                                           |
 | `H-NAME`           | 2    | high              |                                                           |
 | `H-START-SEQUENCE` | 5    | medium            | the order of frames, from the `-v` log                    |
@@ -427,10 +497,10 @@ Confirms: **H-ACTIVITY-PUSH** (steps 2 and 3, with no call from us), **H-OFF-PUS
 | `H-RECONNECT`      | 9    | high              | also confirms the re-read after reconnect; 2026-11-04 reconnect seen, re-read not exercised |
 | `H-SSDP`           | 1    | medium            | no answer can be the network, not the hub                 |
 | `H-TIMING`         | 5    | low               |                                                           |
-| `H-FIXIT`          | 10   | medium            | shape from published dumps of older firmware; compare with the Harmony app |
-| `H-DIGITS`         | 12   | medium            | names and routing read 2026-11-12; that the presses tune a channel is untried |
-| `H-ACTIVITY-PUSH`  | 13   | medium            | **verified 2026-11-04** for starts from the remote (state followed with no call from us); step 13 re-checks it with history |
-| `H-OFF-PUSH`       | 13   | low               | a power off from the app or remote, step 13.4             |
+| `H-FIXIT`          | 10   | medium            | **verified 2026-11-12** on firmware 4.15.600: shape present, two activities match the app; Bedroom TV input (Smart TV vs HDMI 1) open |
+| `H-DIGITS`         | 12   | medium            | **verified 2026-11-12** on the Office LG only: digits intact at 400 ms, `.` and `-` both accepted; single digits alone inconsistent |
+| `H-ACTIVITY-PUSH`  | 13   | medium            | **verified 2026-11-04** for starts from the remote (state followed with no call from us); step 13 re-checked 2026-11-12 (Alexa starts followed too; this server's own start gave one event) |
+| `H-OFF-PUSH`       | 13   | low               | **verified 2026-11-12** for a power off from the Harmony app (step 13.4); the remote's Off button untried |
 
 ## What to send back if something fails
 

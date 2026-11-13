@@ -8,12 +8,14 @@ Assistant and no Logitech cloud. It lets an MCP client such as Claude start and 
 activities, press buttons, and read what's on. It works with any remote paired to a hub (Elite,
 Companion, 950), since the server talks to the hub, not the remote.
 
-> **Status: alpha, looking for testers.** Run on two Harmony Hubs (2026-10-14 and 2026-11-04):
+> **Status: alpha, looking for testers.** Run on two Harmony Hubs (2026-10-14, 2026-11-04 and 2026-11-12):
 > connecting, status and names, starting and switching activities, button presses (routed through
 > the running activity and sent to a named device), power off on one hub and on `all`, the busy
-> guard, and an activity renamed in the Harmony app showing up without a restart. Still
-> simulator-only: SSDP discovery, the exact frames of a start and a press, held buttons, and
-> re-reading state after a reconnect. Every protocol detail is a named assumption (see
+> guard, an activity renamed in the Harmony app showing up without a restart, the activity
+> expected state (`fixit`) against the app, channel digits on one LG TV, the sleep timer, and the
+> activity history. Still simulator-only: SSDP discovery, the exact frames of a start and a press,
+> held buttons, and re-reading state after a reconnect. Not yet tried on hardware: favorites, channel
+> entry on the Bedroom Hub or a set-top box, and a start from the remote's own button for history. Every protocol detail is a named assumption (see
 > [Verification status](#verification-status)), and
 > [HARDWARE_VALIDATION.md](https://github.com/SDNick484/mcp-server-harmony/blob/main/HARDWARE_VALIDATION.md)
 > is the checklist for confirming them. If you have a hub, a
@@ -260,7 +262,7 @@ model has no use for. `harmony_describe_activity` returns the part that matters,
 writes the whole config to a file.
 
 `harmony_describe_activity` reads each activity's `fixit` data from the hub's config (`H-FIXIT`,
-not yet checked on this project's hubs). When an activity has none, it says `expected_state:
+checked against the Harmony app on two activities, firmware 4.15.600). When an activity has none, it says `expected_state:
 "unknown"` and reports power as `unknown` rather than guessing.
 
 ### A session against the simulator
@@ -434,7 +436,7 @@ simulator only:
 | `H-PORT`           | high       | hardware-verified |
 | `H-PROVISION`      | high       | hardware-verified |
 | `H-FRAMES`         | high       | hardware-verified |
-| `H-CONFIG-SHAPE`   | high       | simulator-only |
+| `H-CONFIG-SHAPE`   | high       | hardware-verified |
 | `H-POWEROFF`       | high       | hardware-verified |
 | `H-NAME`           | high       | hardware-verified |
 | `H-START-SEQUENCE` | medium     | simulator-only |
@@ -446,10 +448,10 @@ simulator only:
 | `H-RECONNECT`      | high       | simulator-only |
 | `H-SSDP`           | medium     | simulator-only |
 | `H-TIMING`         | low        | simulator-only |
-| `H-FIXIT`          | medium     | simulator-only |
-| `H-DIGITS`         | medium     | simulator-only |
+| `H-FIXIT`          | medium     | hardware-verified |
+| `H-DIGITS`         | medium     | hardware-verified |
 | `H-ACTIVITY-PUSH`  | medium     | hardware-verified |
-| `H-OFF-PUSH`       | low        | simulator-only |
+| `H-OFF-PUSH`       | low        | hardware-verified |
 
 "High" means aioharmony itself depends on it, and Home Assistant's Harmony integration runs on
 aioharmony. `test_assumptions.py` fails if this table and `assumptions.py` disagree.
