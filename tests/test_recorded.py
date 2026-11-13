@@ -1,11 +1,12 @@
 """Contract tests against data recorded from *your* hubs.
 
-Nothing is recorded yet. At home, run
+Recorded so far: ``office-hub.json`` and ``bedroom-hub.json`` (2026-11-12,
+firmware 4.15.600). To add another hub, run
 
     mcp-server-harmony doctor --dump tests/fixtures/recorded
 
-and commit the files (doctor redacts account details and addresses). Every
-file there is then checked here:
+and look the files over before committing (doctor redacts account details and
+addresses; the repo is public). Every file there is checked here:
 
   1. our parser reads the real config: every activity and device, and every
      activity button resolves to a device that exists (H-CONFIG-SHAPE);

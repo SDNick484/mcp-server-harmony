@@ -129,6 +129,27 @@ async def test_doctor_all_good_and_dump_is_redacted(fake_on_config, tmp_path):
     assert json.loads(to_json(report))["ok"] is True
 
 
+def test_scrub_masks_hub_and_setup_identifiers():
+    """Found in a real 4.15.600 dump (2026-11-12): ids unique to one owner's hubs and Harmony setup. They
+    are not an address or an account name, so the first scrub let them through, but a public fixture
+    shouldn't carry them. The key stays (the shape of the config is the point of a dump), the value goes.
+    The values here are made up; only the key names come from the real dump."""
+    from harmony_mcp.doctor import scrub
+
+    raw = {
+        "provision_info": {"activeRemoteId": 12345678, "hubId": "42"},
+        "discover_info": {"uuid": "ab12" * 10, "host_name": "Den Hub", "remoteId": "12345678"},
+        "hub_state": {"setupSessionClient": "xx-0000", "setupSessionType": 1, "setupSessionIsStale": "false"},
+        "config": {"activity": [{"label": "Watch TV", "id": "7", "uuid": "0000-1111"}]},
+    }
+    out = scrub(raw)
+    assert out["provision_info"] == {"activeRemoteId": "<redacted>", "hubId": "<redacted>"}
+    assert out["discover_info"] == {"uuid": "<redacted>", "host_name": "Den Hub", "remoteId": "<redacted>"}
+    assert set(out["hub_state"].values()) == {"<redacted>"} and len(out["hub_state"]) == 3
+    # Names and ids the catalog is built from are untouched, even where a uuid sits beside them.
+    assert out["config"]["activity"] == [{"label": "Watch TV", "id": "7", "uuid": "<redacted>"}]
+
+
 async def test_a_dump_passes_the_recorded_fixture_checks(fake_on_config, tmp_path):
     """The loop you'll run at home: doctor --dump, then the same checks test_recorded.py runs on it."""
     await run_doctor(load_settings(), timeout=5, dump_dir=tmp_path)

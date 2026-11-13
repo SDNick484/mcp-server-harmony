@@ -20,10 +20,12 @@
 
 - `doctor --dump` could keep the Logitech account's e-mail address: a real config's `global.timeStampHash` embeds it mid-string, where neither the key list nor log redaction caught it. The scrub now drops that key and any value with an address inside it.
 - `harmony_send_command` could not tell the `-` and `.` buttons apart (both normalised to nothing, so the first one won). Exact names are now matched before the normalised match.
+- `doctor --dump` and `export` kept four more identifiers that a real firmware 4.15.600 config carries: `uuid`, `setupSession`, `hubId` and `remoteId`. They are now masked (test: `test_scrub_masks_hub_and_setup_identifiers`), and the first real captures from both hubs are in `tests/fixtures/recorded/`.
 - `mcp-server-harmony call` no longer adds `recording_started` markers to the activity history (every run appended one per hub). `call` now only reads `history.jsonl`, so `call get_history` still shows what a server recorded; `serve` records as before. A history file read while a server is mid-append, even cut inside a multi-byte character, no longer fails to load.
 
 ### Documentation
 
+- Hardware run of HARDWARE_VALIDATION steps 10 to 13 on 2026-11-12 (two hubs, firmware 4.15.600): `H-FIXIT`, `H-DIGITS`, `H-OFF-PUSH` and `H-CONFIG-SHAPE` are now `hardware-verified` (scope and open items in each note); `H-ACTIVITY-PUSH` and `H-RECONNECT` gained notes. Untried: favorites, Bedroom channel entry, the remote's own button for history, the unplug test, the sleep timer's busy retry.
 - README: the status reflects the 2026-11-04 hardware run; a Claude Desktop config using `uvx`; absolute links, so they work on PyPI.
 
 ## [0.3.0] - 2026-11-10
