@@ -2,8 +2,8 @@
 
 The most useful contribution right now is a **hardware report**: run
 [HARDWARE_VALIDATION.md](HARDWARE_VALIDATION.md) (or just try the tools) on your hub and
-[tell us what happened](https://github.com/SDNick484/mcp-server-harmony/issues/new).
-Much of what the server assumes about Harmony Hubs has only run against a simulator.
+[tell us what happened](https://github.com/SDNick484/mcp-server-harmony/issues/new?template=hardware_report.yml).
+The server has run on two Harmony Hubs; several protocol details have still only run against a simulator.
 
 ## Working on the code
 

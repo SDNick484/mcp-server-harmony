@@ -1,9 +1,9 @@
 # Hardware validation (Harmony)
 
-Most of this repo is verified **against the simulator only**: a wire-level fake hub
-(`src/harmony_mcp/sim/fake_hub.py`) driven by the real aioharmony library. The first real-hub
-run (2026-10-14) confirmed the `hardware-verified` entries in `assumptions.py`; this is the
-checklist for the rest. The steps are ordered so each one depends only on the
+This repo is tested against a wire-level fake hub (`src/harmony_mcp/sim/fake_hub.py`) driven by the
+real aioharmony library, and on two physical Harmony Hubs (2026-10-14, 2026-11-04 and 2026-11-12),
+which confirmed the `hardware-verified` entries in `assumptions.py`. This is the checklist for
+confirming the rest. The steps are ordered so each one depends only on the
 ones before it. Each step names the assumptions it confirms (ids and sources in
 `src/harmony_mcp/assumptions.py`).
 

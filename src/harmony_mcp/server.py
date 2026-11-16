@@ -30,7 +30,7 @@ Why there is no separate list_hubs tool: get_status already lists every hub
 with its state, and two tools that both "list hubs" split the model's choice
 for no gain.
 
-Status: verified against the simulator only (see assumptions.py).
+Status: partly verified on two real hubs, the rest against the simulator (see assumptions.py).
 """
 
 from __future__ import annotations
@@ -586,15 +586,15 @@ def _catalog_doc(h: HubClient) -> dict[str, object]:
 
 
 @mcp.resource("harmony://hubs", name="hubs", title="All hubs and their activities", mime_type="application/json")
-def hubs_resource() -> str:
-    return json.dumps([_catalog_doc(h) for h in hubs().hubs], indent=1)
+async def hubs_resource() -> str:
+    return json.dumps([_catalog_doc(h) for h in (await ready_hubs()).hubs], indent=1)
 
 
 @mcp.resource(
     "harmony://hubs/{hub}", name="hub", title="One hub's activities, devices and commands", mime_type="application/json"
 )
-def hub_resource(hub: str) -> str:
-    return json.dumps(_catalog_doc(hubs().candidates(unquote(hub))[0]), indent=1)
+async def hub_resource(hub: str) -> str:
+    return json.dumps(_catalog_doc((await ready_hubs()).candidates(unquote(hub))[0]), indent=1)
 
 
 # --- prompts: workflows a user can invoke ------------------------------------------------

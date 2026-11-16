@@ -153,6 +153,31 @@ async def test_resources_list_the_catalog(two):
     assert living["hub"] == "Living Room"
 
 
+async def test_resources_wait_out_the_startup_grace(config_dir, fakes, factory, monkeypatch):
+    import harmony_mcp.server as server
+
+    class SlowHub(fakes["192.0.2.20"].__class__):
+        async def connect(self) -> bool:
+            await asyncio.sleep(0.05)
+            return await super().connect()
+
+    fakes["192.0.2.20"] = SlowHub()
+    monkeypatch.setattr(server, "HubRegistry", lambda s: HubRegistry(s, api_factory=factory))
+    async with connect_without_wait(server.mcp) as c:
+        doc = json.loads((await c.read_resource("harmony://hubs")).contents[0].text)
+        assert doc[0]["reachable"] is True and doc[0]["activities"] != []
+    fakes["192.0.2.20"] = SlowHub()
+    async with connect_without_wait(server.mcp) as c:
+        one = json.loads((await c.read_resource("harmony://hubs/Living%20Room")).contents[0].text)
+        assert one["reachable"] is True and one["activities"] != []
+
+
+def connect_without_wait(mcp_server):
+    from mcp import Client
+
+    return Client(mcp_server)
+
+
 async def test_fix_stuck_remote_prompt(two):
     prompts = {p.name: p for p in (await two.list_prompts()).prompts}
     assert "fix_stuck_remote" in prompts

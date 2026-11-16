@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.4.0] - 2026-11-15
 
 ### Added
 
@@ -22,6 +22,7 @@
 - `harmony_send_command` could not tell the `-` and `.` buttons apart (both normalised to nothing, so the first one won). Exact names are now matched before the normalised match.
 - `doctor --dump` and `export` kept four more identifiers that a real firmware 4.15.600 config carries: `uuid`, `setupSession`, `hubId` and `remoteId`. They are now masked (test: `test_scrub_masks_hub_and_setup_identifiers`), and the first real captures from both hubs are in `tests/fixtures/recorded/`.
 - `mcp-server-harmony call` no longer adds `recording_started` markers to the activity history (every run appended one per hub). `call` now only reads `history.jsonl`, so `call get_history` still shows what a server recorded; `serve` records as before. A history file read while a server is mid-append, even cut inside a multi-byte character, no longer fails to load.
+- `harmony://hubs` and `harmony://hubs/{hub}` wait out the same startup connection grace as tool calls when read right after the server starts.
 
 ### Documentation
 

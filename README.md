@@ -30,24 +30,24 @@ the library behind Home Assistant's Harmony integration.
 A Harmony is built around *activities* ("Watch Shield", "Listen to Music"): starting one
 powers the right devices and sets their inputs. That's also the right level for a model:
 
-- `start_activity("Watch Shield")` is one call; the hub handles the device choreography.
-- `send_command("VolumeUp")` with no device goes **through the running activity**, so volume
+- `harmony_start_activity("Watch Shield")` is one call; the hub handles the device choreography.
+- `harmony_send_command("VolumeUp")` with no device goes **through the running activity**, so volume
   reaches the receiver and Pause reaches the Shield without the model knowing your wiring.
-- `send_command(device="Onkyo AV Receiver", ...)` is there for the cases activities don't cover.
+- `harmony_send_command(device="Onkyo AV Receiver", ...)` is there for the cases activities don't cover.
 
 ## Several hubs
 
 One server drives all your hubs, each by its own name (the one set in the Harmony app). Tools
 take an optional `hub`, and the model only needs it when a name is ambiguous:
 
-- **Unique names just work.** `start_activity("Watch TV")` finds the one hub that has it.
+- **Unique names just work.** `harmony_start_activity("Watch TV")` finds the one hub that has it.
 - **A repeated name asks.** If both hubs have "Listen to Music", the tool returns an error
   naming both hubs, and the model asks you or retries with `hub`.
 - **Hub-qualified refs.** The list tools return a `ref` such as `"Den/Listen to Music"`, which
   works anywhere a name does, so the model can copy one string.
 - **Buttons follow the running activity**, when exactly one hub has one running. With both
-  TVs on, `send_command("VolumeUp")` asks which.
-- **`power_off`** turns off the one hub that's on, asks if several are, and takes `hub="all"`
+  TVs on, `harmony_send_command("VolumeUp")` asks which.
+- **`harmony_power_off`** turns off the one hub that's on, asks if several are, and takes `hub="all"`
   for every one. With `all`, each hub is reported separately, so one unreachable hub doesn't
   stop the others. `force=true` is the escape hatch for a hub stuck mid-sequence: it sends the
   power off even while busy (see [Safety design](#safety-design)).
@@ -63,7 +63,7 @@ it is called, so the server, which is long-lived and holds the hub connection, k
 - It runs the same power off as `harmony_power_off`, so the busy guard, the rate limit and dry run apply.
   If the hub is mid-sequence or unreachable when it fires, it retries every 15 s for 5 minutes, then
   gives up and keeps the reason.
-- With no `hub`, exactly one hub must be on (the `power_off` rule). A hub that is off is refused.
+- With no `hub`, exactly one hub must be on (the `harmony_power_off` rule). A hub that is off is refused.
   `minutes=0` cancels (with no `hub`, the one hub that has a timer). A new timer replaces the old one.
 - The hub being powered off before it fires, by anyone, drops the timer. Switching activities keeps it.
 - Nothing can notify the model when it fires, so `harmony_get_status` shows each hub's `sleep_timer`
@@ -153,10 +153,21 @@ venv to manage. In Claude Desktop's `claude_desktop_config.json`:
 
 Or point `command` at the venv you installed into (`~/.venvs/harmony/bin/mcp-server-harmony`; on
 Windows, `...\Scripts\mcp-server-harmony.exe`). Run `check` first (`uvx mcp-server-harmony check --host <ip>`):
-the server reads the hubs from its `config.json`, so the client config needs no settings. Claude Desktop doesn't
-see your shell's `PATH`, so if it can't start `uvx`, give its full path (`which uvx`, or `where uvx` on Windows).
+the server reads the hubs from its `config.json`, so the client config needs no settings. Alternatively,
+pass the hub addresses directly in the client config with `"env": {"HARMONY_HOSTS": "192.168.1.60,192.168.1.61"}`.
+Claude Desktop doesn't see your shell's `PATH`, so if it can't start `uvx`, give its full path (`which uvx`, or
+`where uvx` on Windows).
 
 For Claude Code: `claude mcp add harmony -- uvx mcp-server-harmony`.
+
+Things you can ask:
+
+- *"What's on in the living room?"*
+- *"Start Watch Shield in the den and turn the volume down 3 steps."*
+- *"Tune the living room TV to ESPN"* (or *"tune to 9.1"*).
+- *"Turn the bedroom TV off in 45 minutes."*
+- *"How long was the office TV on today, and was it turned on from the remote?"*
+- *"I'm moving to a Sofabaton X2 — write a checklist for rebuilding all my Harmony activities there."*
 
 As a service (Streamable HTTP), to share one instance between Claude Code, Claude Desktop and
 the mobile app through a Cloudflare Tunnel with Cloudflare Access in front:
@@ -296,10 +307,10 @@ Two hubs that both have "Listen to Music". (Output from `simulate`, trimmed.)
   {"hub": "Living Room", "outcome": "done", "detail": "Send VolumeUp x3 to Onkyo AV Receiver on Living Room",
    "sent": ["holdAction press+release Onkyo AV Receiver/VolumeUp", ...]}
 
-> power_off
+> harmony_power_off
   ERROR: Several hubs are on (Living Room, Den); pass hub, or hub='all' for every one.
 
-> power_off {"hub": "all"}
+> harmony_power_off {"hub": "all"}
   {"results": [{"hub": "Living Room", "outcome": "done", "detail": "Power off Living Room", ...},
                {"hub": "Den", "outcome": "done", "detail": "Power off Den", ...}]}
 ```
@@ -344,7 +355,7 @@ appending while a `call` reads, a half-written last line is skipped, never an er
   the hub a free-form channel and skip that.
 - **No interleaving with activity sequences.** While a hub is starting an activity or powering
   off, its commands are refused with "busy, try again", since a press mid-sequence can land on
-  a device that's still warming up. The one exception is `power_off(force=true)`, for a sequence
+  a device that's still warming up. The one exception is `harmony_power_off(force=true)`, for a sequence
   that never finishes (a device that never answers its warm-up): it skips this server's own busy
   guard and sends the power off anyway. It still counts against the rate limit, and with no `hub`
   it only acts on hubs that are on or mid-sequence. The hub itself can still say no: on a real hub
@@ -375,7 +386,7 @@ appending while a `call` reads, a half-written last line is skipped, never an er
 - **Logs are redacted**: IP addresses and MACs (unless `--no-redact`), and always secrets (JWTs,
   bearer tokens, keys, URL passwords). They go to stderr; stdout is the MCP transport.
 - Every tool carries a title and MCP annotations. Nothing is marked destructive (activities and
-  button presses change what's on, not data). `send_command` is the one non-idempotent action,
+  button presses change what's on, not data). `harmony_send_command` is non-idempotent,
   since VolumeUp twice is +2.
 
 ## Troubleshooting

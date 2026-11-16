@@ -47,13 +47,17 @@ body:
       options:
         - label: "`discover` found the hub (SSDP)"
         - label: "`check --host` added the hub with its name"
-        - label: list_activities / list_devices / list_commands show the right names
-        - label: start_activity turns the devices on, and returns "done" once they're on
-        - label: power_off turns them off, and returns "done"
-        - label: send_command with no device reaches the right device through the running activity
-        - label: send_command with hold_ms behaves like holding the button
+        - label: harmony_list_activities / harmony_list_devices / harmony_list_commands show the right names
+        - label: harmony_start_activity turns the devices on, and returns "done" once they're on
+        - label: harmony_power_off turns them off, and returns "done"
+        - label: harmony_send_command with no device reaches the right device through the running activity
+        - label: harmony_send_command with hold_ms behaves like holding the button
+        - label: harmony_tune_channel tunes the channel (by number or favorite)
+        - label: harmony_set_sleep_timer turns the hub off when due (and drops if powered off first)
+        - label: harmony_describe_activity / `export` match the devices and inputs shown in the Harmony app
+        - label: harmony_get_history records activity changes from this server and from the remote/app
         - label: An activity renamed in the Harmony app shows up without restarting the server
-        - label: After the hub drops off the network and comes back, get_status shows its current activity
+        - label: After the hub drops off the network and comes back, harmony_get_status shows its current activity
         - label: Several hubs, with a repeated activity name, ask which hub instead of guessing
   - type: textarea
     id: details
