@@ -214,6 +214,7 @@ and an MCP call over HTTP reaching a simulated hub.
 | `HARMONY_DRY_RUN`        | off                                   | Read the hubs, send nothing that changes anything (`serve --dry-run` too) |
 | `HARMONY_LOG_UNREDACTED` | off                                   | Don't mask IPs and MACs in logs (`--no-redact`); secrets stay masked |
 | `HARMONY_HISTORY`        | on                                    | `off` stops recording activity changes (see Activity history); beats `"history"` in `config.json` |
+| `HARMONY_VOLUME_UP_LIMIT` | 20                                   | Volume-up presses allowed per hub in any 5 minutes, 1-20; beats `"volume_up_limit"` in `config.json` |
 
 `config.json` (written by `check`, safe to edit by hand):
 
@@ -367,6 +368,11 @@ appending while a `call` reads, a half-written last line is skipped, never an er
   second; 4 activity changes in a burst, then one per 15 s. A call over the limit is refused
   whole, never half-sent. A channel number is one sequence of up to 8 presses, 400 ms apart, charged
   and refused as a whole.
+- **Volume up is capped, per hub: at most 20 presses in any 5 minutes.** A hub can't read the
+  receiver's level, so every press is one step louder; the receiver's own server caps a level it is
+  set to (`max_volume`), but not presses sent through the hub. A held volume-up press is refused
+  (most receivers keep turning up while it's held). Volume down and mute are never limited.
+  `"volume_up_limit"` in `config.json` or `HARMONY_VOLUME_UP_LIMIT` lowers the cap (1-20).
 - **Activity history is a record of viewing habits, kept on your own disk.** It stores, per change: the
   time, the hub's name, the activity names before and after, how long the previous one lasted, and
   whether this server or something else caused it. No addresses (a hub known only by its address is
@@ -398,6 +404,7 @@ appending while a `call` reads, a half-written last line is skipped, never an er
 | `... exists on Living Room, Den; pass hub to choose.`     | The name is on more than one hub: the model should ask which TV, or use a ref                |
 | `Den is busy starting ...`                                | An activity is mid-sequence. Wait until `harmony_get_status` shows `transition: null`; if it never clears, `harmony_power_off(force=true)` (the hub may still refuse a power off mid-start, "Activity in progress") |
 | `Rate limit: refusing to ...`                             | Many presses in a short time. Wait and retry if it was deliberate                            |
+| `Volume-up limit on ...`                                  | 20 volume-up presses in 5 minutes. Set a level with the receiver's or TV's own volume tool instead |
 
 `doctor` says which layer failed for each hub and what to check.
 

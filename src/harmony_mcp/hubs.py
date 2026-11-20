@@ -74,7 +74,14 @@ class HubRegistry:
         )
         self._ready_checked = False
         self.hubs = [
-            HubClient(h, settings.protocol, api_factory, dry_run=settings.dry_run, history=self.history)
+            HubClient(
+                h,
+                settings.protocol,
+                api_factory,
+                dry_run=settings.dry_run,
+                history=self.history,
+                volume_up_limit=settings.volume_up_limit,
+            )
             for h in settings.hubs
         ]
         if settings.port is not None:

@@ -10,7 +10,7 @@ import pytest
 from harmony_mcp.client import HarmonyError, HubClient
 from harmony_mcp.config import HubSettings, load_settings
 from harmony_mcp.hubs import HubRegistry
-from harmony_mcp.ratelimit import TokenBucket
+from harmony_mcp.ratelimit import TokenBucket, WindowLimit
 
 from .conftest import LIVING, ONKYO, wait_until
 from .test_tools import connect, outcomes, text
@@ -31,6 +31,11 @@ def volume_up(c: HubClient):
     return c.catalog.find_command(c.catalog.device("Onkyo AV Receiver").commands, "VolumeUp")
 
 
+def mute(c: HubClient):
+    # The fake hub has Mute only in an activity's buttons; it still goes to the receiver.
+    return c.catalog.find_command(c.catalog.activity("Watch Shield").commands, "Mute")
+
+
 # --- dry-run ------------------------------------------------------------------------------
 async def test_dry_run_sends_nothing_but_says_what_it_would(fake):
     c = HubClient(HubSettings(LIVING), api_factory=fake.build, dry_run=True)
@@ -38,8 +43,8 @@ async def test_dry_run_sends_nothing_but_says_what_it_would(fake):
     await wait_until(lambda: c.available)
     o = await c.start_activity(c.catalog.activity("Watch Shield"))
     assert (o.dry_run, o.changed, o.sent) == (True, False, ["runactivity activityId=38000001 (Watch Shield)"])
-    o = await c.send(volume_up(c), repeat=2, hold_ms=500)
-    assert o.sent == ["holdAction press+release Onkyo AV Receiver/VolumeUp, held 500 ms"] * 2
+    o = await c.send(mute(c), repeat=2, hold_ms=500)
+    assert o.sent == ["holdAction press+release Onkyo AV Receiver/Mute, held 500 ms"] * 2
     assert fake.started == [] and fake.sent == []  # nothing reached the hub
     assert c.snapshot()["power"] == "off"  # and our state didn't pretend otherwise
     await c.stop()
@@ -74,9 +79,9 @@ async def test_per_call_caps(hub, fake, kwargs, message):
 
 
 async def test_hold_and_delay_reach_aioharmony(hub, fake):
-    await hub.send(volume_up(hub), repeat=2, hold_ms=250, delay_ms=150)
+    await hub.send(mute(hub), repeat=2, hold_ms=250, delay_ms=150)
     press = fake.sent[0]
-    assert (press.device, press.command, press.delay) == (ONKYO, "VolumeUp", 0.25)  # held 250 ms
+    assert (press.device, press.command, press.delay) == (ONKYO, "Mute", 0.25)  # held 250 ms
     assert fake.sent[1] == 0.15  # a bare float is aioharmony's pause between presses
 
 
@@ -90,6 +95,85 @@ async def test_runaway_presses_are_refused_whole(hub, fake):
     assert len(fake.presses()) == 4  # the refused call sent none of its three
     now[0] = 2.0
     await hub.send(volume_up(hub), repeat=3)
+
+
+# --- the volume-up cap -------------------------------------------------------------------------
+# A hub can't read the receiver's level, so every volume-up press makes it louder whatever the level
+# already is. WindowLimit itself is tested in test_ratelimit.py (shared); these test how the hub uses it.
+def capped(hub: HubClient, limit: int = 20) -> list[float]:
+    now = [0.0]
+    hub.volume_up_window = WindowLimit(limit, 300, clock=lambda: now[0])
+    hub.press_bucket = TokenBucket(capacity=100, rate=100.0)  # out of the way: this is about the window
+    return now
+
+
+async def test_volume_up_is_capped_per_window(hub, fake):
+    now = capped(hub)
+    await hub.send(volume_up(hub), repeat=10)
+    await hub.send(volume_up(hub), repeat=10)
+    now[0] = 299.0
+    with pytest.raises(HarmonyError) as refused:
+        await hub.send(volume_up(hub))
+    message = str(refused.value)
+    for expected in [
+        "Living Room",
+        "at most 20 volume-up presses in any 5 minutes",
+        "try again in 1s",
+        "onkyo_set_volume",
+        "webos_set_volume",
+        "max_volume",
+    ]:
+        assert expected in message, expected
+    assert len(fake.presses()) == 20  # the refused press was not sent
+    now[0] = 300.0
+    await hub.send(volume_up(hub), repeat=10)  # the first ten have left the window
+
+
+async def test_volume_up_counts_every_repeat_and_refuses_whole(hub, fake):
+    capped(hub, limit=5)
+    await hub.send(volume_up(hub), repeat=4)
+    with pytest.raises(HarmonyError, match="refusing to press VolumeUp x2"):
+        await hub.send(volume_up(hub), repeat=2)
+    assert len(fake.presses()) == 4
+
+
+async def test_volume_down_and_mute_are_never_capped(hub, fake):
+    capped(hub, limit=1)
+    await hub.send(volume_up(hub))
+    for _ in range(3):
+        await hub.send(mute(hub))
+    assert len(fake.presses()) == 4
+
+
+async def test_a_held_volume_up_is_refused(hub, fake):
+    # Most receivers ramp while the button is held, so one held press can be many steps.
+    with pytest.raises(HarmonyError, match="can't be held"):
+        await hub.send(volume_up(hub), hold_ms=500)
+    assert fake.sent == []
+
+
+async def test_volume_up_refused_by_the_press_limit_is_not_counted(hub, fake):
+    capped(hub, limit=5)
+    now = [0.0]
+    hub.press_bucket = TokenBucket(capacity=3, rate=1.0, clock=lambda: now[0])
+    with pytest.raises(HarmonyError, match="Rate limit on Living Room"):
+        await hub.send(volume_up(hub), repeat=4)
+    await hub.send(volume_up(hub), repeat=3)
+    now[0] = 2.0
+    await hub.send(volume_up(hub), repeat=2)  # 5 in the window: the refused 4 never counted
+
+
+async def test_volume_up_through_the_activity_is_capped(two_hubs, factory, monkeypatch, fakes):
+    monkeypatch.setenv("HARMONY_VOLUME_UP_LIMIT", "2")
+    c = await connect(monkeypatch, factory)
+    try:
+        await c.call_tool("harmony_start_activity", {"activity": "Living Room/Watch Shield"})
+        r = await c.call_tool("harmony_send_command", {"command": "volume up", "hub": "Living Room", "repeat": 2})
+        assert not r.is_error
+        r = await c.call_tool("harmony_send_command", {"command": "VolumeUp", "hub": "Living Room"})
+        assert r.is_error and "at most 2 volume-up presses" in text(r)
+    finally:
+        await c.__aexit__(None, None, None)
 
 
 async def test_activity_flapping_is_limited(hub, fake):
@@ -210,6 +294,7 @@ def test_config_problems_are_sentences_not_crashes(config_dir):
                 ],
                 "port": 99999,
                 "protocol": "TELNET",
+                "volume_up_limit": 50,
             }
         )
     )
@@ -223,6 +308,7 @@ def test_config_problems_are_sentences_not_crashes(config_dir):
         "two hubs are named 'tv'",
         "ignoring port 99999",
         "ignoring protocol 'TELNET'",
+        "ignoring volume_up_limit 50 in config.json: expected a whole number from 1 to 20",
     ]:
         assert expected in joined, expected
 
@@ -254,3 +340,16 @@ async def test_power_off_with_nothing_on_returns_no_results(settings, factory, m
         assert outcomes(await c.call_tool("harmony_power_off", {"hub": "all"})) == []
     finally:
         await c.__aexit__(None, None, None)
+
+
+def test_volume_up_limit_setting(config_dir, monkeypatch):
+    (config_dir / "config.json").write_text(json.dumps({"hubs": [{"host": "192.0.2.20"}], "volume_up_limit": 8}))
+    assert load_settings().volume_up_limit == 8
+    monkeypatch.setenv("HARMONY_VOLUME_UP_LIMIT", "5")
+    assert load_settings().volume_up_limit == 5  # the environment wins
+    monkeypatch.setenv("HARMONY_VOLUME_UP_LIMIT", "lots")
+    s = load_settings()
+    assert s.volume_up_limit == 8 and "ignoring HARMONY_VOLUME_UP_LIMIT='lots'" in "\n".join(s.problems)
+    monkeypatch.delenv("HARMONY_VOLUME_UP_LIMIT")
+    (config_dir / "config.json").write_text(json.dumps({"hubs": [{"host": "192.0.2.20"}]}))
+    assert load_settings().volume_up_limit == 20
