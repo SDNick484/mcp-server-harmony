@@ -48,9 +48,12 @@ from .limits import (
     MIN_DELAY_MS,
     PRESS_CAPACITY,
     PRESS_RATE,
+    VOLUME_UP_LIMIT,
+    VOLUME_UP_NAMES,
+    VOLUME_UP_WINDOW,
 )
 from .logsafe import mask_ip
-from .ratelimit import TokenBucket, refusal
+from .ratelimit import TokenBucket, WindowLimit, refusal
 from .tasks import spawn_task, stop_task
 
 log = logging.getLogger(__name__)
@@ -176,12 +179,14 @@ class HubClient:
         *,
         dry_run: bool = False,
         history: History | None = None,
+        volume_up_limit: int = VOLUME_UP_LIMIT,
     ) -> None:
         self.hub = hub
         self.protocol = protocol
         self.dry_run = dry_run
         self.press_bucket = TokenBucket(PRESS_CAPACITY, PRESS_RATE)
         self.activity_bucket = TokenBucket(ACTIVITY_CAPACITY, ACTIVITY_RATE)
+        self.volume_up_window = WindowLimit(volume_up_limit, VOLUME_UP_WINDOW)
         self._api_factory = api_factory
         self._api: Any = None
         self._task: asyncio.Task[None] | None = None
@@ -476,6 +481,25 @@ class HubClient:
         if wait:
             raise HarmonyError(refusal(what, wait, device=self.name))
 
+    def _limit_volume_up(self, name: str, repeat: int, hold_ms: int) -> None:
+        """Count `repeat` volume-up presses against this hub's window, or refuse them all (limits.py says why)."""
+        if hold_ms:
+            raise HarmonyError(
+                f"{name} can't be held: most receivers keep turning up for as long as it is held. "
+                "Use repeat for more steps."
+            )
+        wait = self.volume_up_window.take(repeat)
+        if not wait:
+            return
+        window = self.volume_up_window
+        when = "more than that at once" if wait == float("inf") else f"try again in {max(wait, 1):.0f}s"
+        raise HarmonyError(
+            f"Volume-up limit on {self.name}: refusing to press {name} x{repeat}: at most {window.limit} volume-up "
+            f"presses in any {window.window / 60:.0f} minutes ({when}). A hub can't read the volume, so this caps "
+            "how much louder it can make things. To set a level directly, use the receiver's or TV's own volume "
+            "tool (onkyo_set_volume, webos_set_volume), which is capped at its max_volume."
+        )
+
     async def start_activity(self, activity: Activity) -> Outcome:
         """Start an activity and wait until the hub says it's done.
 
@@ -565,7 +589,15 @@ class HubClient:
                 f"That would take {total:.1f}s ({repeat} x {hold_ms} ms held, {gap_ms} ms apart); the limit is "
                 f"{MAX_CALL_SECONDS:.0f}s per call. Use fewer repeats or a shorter hold."
             )
-        self._limit(self.press_bucket, repeat, f"press {command.name} x{repeat}")
+        volume_up = norm(command.name) in VOLUME_UP_NAMES
+        if volume_up:
+            self._limit_volume_up(command.name, repeat, hold_ms)
+        try:
+            self._limit(self.press_bucket, repeat, f"press {command.name} x{repeat}")
+        except HarmonyError:
+            if volume_up:
+                self.volume_up_window.refund(repeat)  # nothing was sent, so nothing got louder
+            raise
         device = self.catalog.device_name(command.device_id)
         held = f", held {hold_ms} ms" if hold_ms else ""
         sent = [f"holdAction press+release {device}/{command.name}{held}"] * repeat

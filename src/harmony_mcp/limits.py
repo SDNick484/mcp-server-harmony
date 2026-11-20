@@ -18,6 +18,15 @@ from __future__ import annotations
 PRESS_CAPACITY, PRESS_RATE = 20.0, 4.0
 # Activity changes (start or power off) per hub: 4 in a burst, then one per 15 s.
 ACTIVITY_CAPACITY, ACTIVITY_RATE = 4.0, 1 / 15
+# Volume-up presses per hub: at most VOLUME_UP_LIMIT in any VOLUME_UP_WINDOW seconds, counted across calls.
+# A hub sends blind IR and can't read the receiver's level, so each press is one step louder whatever the
+# level already is; the receiver's own server caps a level it is *set* to (max_volume), but not presses. A
+# sliding window (WindowLimit), not a bucket, because the count itself is the safety limit: a bucket of 20
+# refilling over five minutes would allow 40 in a five-minute stretch. Settings can lower it, never raise it.
+VOLUME_UP_LIMIT = 20
+VOLUME_UP_WINDOW = 300.0
+# Command names (after catalog.norm) that turn the volume up. Volume down and mute are never limited.
+VOLUME_UP_NAMES = frozenset({"volumeup", "volup", "volumeplus", "volplus"})
 # Per call.
 MAX_REPEAT = 10
 MAX_HOLD_MS = 3000

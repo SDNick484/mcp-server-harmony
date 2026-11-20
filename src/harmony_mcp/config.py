@@ -23,6 +23,10 @@ the first time it sees the hub, so the name is known even when a hub is
 offline at startup. A name you write yourself is kept; ``check`` never
 overwrites one.
 
+``"volume_up_limit"`` (or ``HARMONY_VOLUME_UP_LIMIT``, which wins) lowers the
+cap on volume-up presses per hub in any five minutes: 1 to 20, default 20
+(limits.py says why).
+
 ``HARMONY_HOSTS`` (comma-separated) or ``HARMONY_HOST`` replaces the file's
 list, picking up names from the file for hosts it also lists. The old
 single-hub form ``{"host": "..."}`` still works.
@@ -44,6 +48,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from .channels import favorite, looks_like_number, number_problem
+from .limits import VOLUME_UP_LIMIT
 
 log = logging.getLogger(__name__)
 
@@ -84,6 +89,8 @@ class Settings:
     # Record activity changes (history.py), in memory and in history.jsonl in the config directory.
     # HARMONY_HISTORY=off or "history": false in config.json turns it off.
     history: bool = True
+    # Volume-up presses allowed per hub in any VOLUME_UP_WINDOW (limits.py); settings can only lower it.
+    volume_up_limit: int = VOLUME_UP_LIMIT
     # Problems found while loading, as sentences; logged at startup and shown by `doctor`.
     problems: tuple[str, ...] = ()
 
@@ -251,8 +258,25 @@ def load_settings() -> Settings:
         port=port,
         dry_run=_flag(os.environ.get("HARMONY_DRY_RUN")),
         history=_history_enabled(os.environ.get("HARMONY_HISTORY"), data, problems),
+        volume_up_limit=_volume_up_limit(os.environ.get("HARMONY_VOLUME_UP_LIMIT"), data, problems),
         problems=tuple(problems),
     )
+
+
+def _volume_up_limit(env: str | None, data: dict[str, Any], problems: list[str]) -> int:
+    """HARMONY_VOLUME_UP_LIMIT wins over config.json's "volume_up_limit"; either may only lower the default."""
+    expected = f"expected a whole number from 1 to {VOLUME_UP_LIMIT}"
+    if env is not None and env.strip():
+        if env.strip().isdigit() and 1 <= int(env) <= VOLUME_UP_LIMIT:
+            return int(env)
+        problems.append(f"ignoring HARMONY_VOLUME_UP_LIMIT={env!r}: {expected}")
+    value = data.get("volume_up_limit")
+    if value is None:
+        return VOLUME_UP_LIMIT
+    if isinstance(value, int) and not isinstance(value, bool) and 1 <= value <= VOLUME_UP_LIMIT:
+        return value
+    problems.append(f"ignoring volume_up_limit {value!r} in config.json: {expected}")
+    return VOLUME_UP_LIMIT
 
 
 def save_hub(host: str, name: str | None) -> Path:
