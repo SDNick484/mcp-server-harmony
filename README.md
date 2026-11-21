@@ -215,6 +215,8 @@ and an MCP call over HTTP reaching a simulated hub.
 | `HARMONY_LOG_UNREDACTED` | off                                   | Don't mask IPs and MACs in logs (`--no-redact`); secrets stay masked |
 | `HARMONY_HISTORY`        | on                                    | `off` stops recording activity changes (see Activity history); beats `"history"` in `config.json` |
 | `HARMONY_VOLUME_UP_LIMIT` | 20                                   | Volume-up presses allowed per hub in any 5 minutes, 1-20; beats `"volume_up_limit"` in `config.json` |
+| `MCP_ALLOWED_SERVICE_TOKENS` | *(none)*                          | `serve --http` only: comma-separated Cloudflare Access service-token client IDs (e.g. `token-1.access`) admitted as automated callers; unset admits none (403) |
+| `MCP_AUTOMATION_TIERS`   | `read,power-off`                      | `serve --http` only: what an admitted service token may use; may add `everyday`, never `costly` (see [Who may call what](#who-may-call-what)) |
 
 `config.json` (written by `check`, safe to edit by hand):
 
@@ -276,6 +278,23 @@ writes the whole config to a file.
 `harmony_describe_activity` reads each activity's `fixit` data from the hub's config (`H-FIXIT`,
 checked against the Harmony app on two activities, firmware 4.15.600). When an activity has none, it says `expected_state:
 "unknown"` and reports power as `unknown` rather than guessing.
+
+### Who may call what
+
+Every tool has an authorization tier. People (an Access login, or stdio) may use all of them; an Access
+service token, if you admit one, gets only `MCP_AUTOMATION_TIERS` (default `read,power-off`):
+
+- `read`: `harmony_get_status`, `harmony_list_activities`, `harmony_list_devices`, `harmony_list_commands`,
+  `harmony_describe_activity`, `harmony_get_history`.
+- `power-off`: `harmony_power_off`, and `harmony_set_sleep_timer` when it sets a timer (`minutes` above 0; 0
+  cancels, which is `everyday`).
+- `everyday`: `harmony_start_activity`, `harmony_send_command` (it can press any button, power-on and
+  power-toggle included, so it is never `power-off`), `harmony_tune_channel`.
+- `costly`: none is costly; no tool asks for confirmation.
+
+A service token now gets 403 unless its client ID is in `MCP_ALLOWED_SERVICE_TOKENS`, even with no email
+allow-list. The volume-up cap is separate from tiers and applies to every caller. More in
+[mcp-server-shared](https://github.com/SDNick484/mcp-server-shared#what-each-caller-may-do).
 
 ### A session against the simulator
 
