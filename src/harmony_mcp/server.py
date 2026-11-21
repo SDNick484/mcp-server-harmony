@@ -63,6 +63,7 @@ from .limits import (
     MIN_DELAY_MS,
 )
 from .lookup import unknown_with_suggestions
+from .remote import request_state_security, tier
 from .tools import ACT, ACT_IDEMPOTENT, READ_ONLY
 
 log = logging.getLogger(__name__)
@@ -113,6 +114,7 @@ mcp = MCPServer(
         "('Den/Watch TV', the `ref` field of list results); pass hub only when a name exists on several hubs."
     ),
     lifespan=lifespan,
+    request_state_security=request_state_security(),
 )
 
 # Annotations from .tools: explicit on every tool, since a tool without them is
@@ -211,6 +213,7 @@ def _result(h: HubClient, o: Outcome, done: str, unchanged: str) -> ActionResult
 
 # --- reads ------------------------------------------------------------------------------
 @mcp.tool(title="Get hub status", annotations=_READ)
+@tier("read")
 async def harmony_get_status() -> HubsStatus:
     """Start here. Lists every hub (one per TV) with whether it's reachable, on or off, and its running activity.
 
@@ -230,6 +233,7 @@ async def harmony_get_status() -> HubsStatus:
 
 
 @mcp.tool(title="List activities", annotations=_READ)
+@tier("read")
 async def harmony_list_activities(hub: Hub = None) -> list[ActivityInfo]:
     """List the activities on each hub (e.g. 'Watch Shield'), marking the running ones. Each has a ref usable
     anywhere an activity name is."""
@@ -241,6 +245,7 @@ async def harmony_list_activities(hub: Hub = None) -> list[ActivityInfo]:
 
 
 @mcp.tool(title="List devices", annotations=_READ)
+@tier("read")
 async def harmony_list_devices(hub: Hub = None) -> list[DeviceInfo]:
     """List the devices each hub controls, with how many commands each knows. Use only when an activity
     doesn't cover what you need (harmony_send_command with device)."""
@@ -265,6 +270,7 @@ Target = Annotated[
 
 
 @mcp.tool(title="List commands", annotations=_READ)
+@tier("read")
 async def harmony_list_commands(target: Target = None, hub: Hub = None) -> CommandList:
     """List the commands harmony_send_command accepts for an activity or device (default: the running activity).
 
@@ -277,6 +283,7 @@ async def harmony_list_commands(target: Target = None, hub: Hub = None) -> Comma
 
 # --- writes -----------------------------------------------------------------------------
 @mcp.tool(title="Start an activity", annotations=_ACT_IDEMPOTENT)
+@tier("everyday")
 async def harmony_start_activity(
     activity: Annotated[
         str, Field(description="Activity name or ref from harmony_list_activities, e.g. 'Den/Watch TV'.")
@@ -294,6 +301,7 @@ async def harmony_start_activity(
 
 
 @mcp.tool(title="Turn a TV system off", annotations=_ACT_IDEMPOTENT)
+@tier("power-off")
 async def harmony_power_off(
     hub: Annotated[
         str | None,
@@ -326,6 +334,7 @@ async def harmony_power_off(
 
 
 @mcp.tool(title="Send a command", annotations=_ACT)
+@tier("everyday")
 async def harmony_send_command(
     command: Annotated[str, Field(description="Command name or label from harmony_list_commands, e.g. 'VolumeUp'.")],
     device: Annotated[
@@ -370,6 +379,7 @@ async def harmony_send_command(
 
 
 @mcp.tool(title="Describe an activity", annotations=_READ)
+@tier("read")
 async def harmony_describe_activity(
     activity: Annotated[
         str, Field(description="Activity name or ref from harmony_list_activities, e.g. 'Den/Watch TV'.")
@@ -387,6 +397,10 @@ async def harmony_describe_activity(
 
 
 @mcp.tool(title="Set a sleep timer", annotations=_ACT)
+# Setting a timer can only ever switch a hub off (later), so an automated "make sure it's off" job may; cancelling
+# one keeps a TV on, which is not power-off. harmony_send_command is "everyday", not power-off: it can press any
+# button, power-on and toggle included.
+@tier(lambda args: "power-off" if args["minutes"] > 0 else "everyday")
 async def harmony_set_sleep_timer(
     minutes: Annotated[
         int,
@@ -458,6 +472,7 @@ def _digit_buttons(pool: tuple[Command, ...], number: str) -> tuple[list[Command
 
 
 @mcp.tool(title="Tune to a channel", annotations=_ACT)
+@tier("everyday")
 async def harmony_tune_channel(
     channel: Annotated[
         str,
@@ -533,6 +548,7 @@ async def harmony_tune_channel(
 
 
 @mcp.tool(title="Get activity history", annotations=_READ)
+@tier("read")
 async def harmony_get_history(
     hub: Hub = None,
     limit: Annotated[int, Field(ge=1, le=100, description="Most events to return, 1-100.")] = 20,
