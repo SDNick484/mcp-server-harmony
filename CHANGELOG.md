@@ -9,6 +9,7 @@
 
 ### Added
 
+- `GET /harmony/mcp/healthz`, the health check under the MCP path (the only one a tunnel routing `/harmony/mcp` reaches), and both health routes report the installed `commit` and `repo` from `/opt/mcp-server-harmony/COMMIT`, which `deploy/alpine/install.sh` now writes (pinning the default source to `main`'s current commit first). `remote.py` and the new `deploy/alpine/commit.sh` synced from mcp-server-shared a48209b.
 - Volume up is capped per hub: at most 20 presses in any 5 minutes, counted across calls, whether sent to a device or through the running activity. A hub sends blind IR and can't read the level, so the receiver's own `max_volume` never saw these presses. Over the limit, the call is refused whole and points to the receiver's or TV's own volume tool. A held volume-up press is refused. Volume down and mute are never limited. `"volume_up_limit"` in `config.json` or `HARMONY_VOLUME_UP_LIMIT` lowers the cap (1-20). Uses the shared `WindowLimit` (shared `ratelimit.py` synced).
 
 ## [0.4.0] - 2026-11-15
