@@ -279,7 +279,10 @@ async def healthz() -> httpx2.Response:
         return await http.get(remote.HEALTH_PATH)
 
 
-async def test_healthz_is_ok_while_a_hub_is_connected(mcp_client):
+async def test_healthz_is_ok_while_a_hub_is_connected(mcp_client, monkeypatch, tmp_path):
+    # A COMMIT file beside the venv (install.sh writes one, and the Alpine smoke test runs pytest from that
+    # venv) would add "commit" and "repo"; this test is about the status alone.
+    monkeypatch.setenv(remote.COMMIT_FILE_ENV, str(tmp_path / "absent"))
     resp = await healthz()
     assert resp.status_code == 200 and resp.json() == {"status": "ok"}
 

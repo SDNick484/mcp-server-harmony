@@ -8,6 +8,7 @@
 # nothing else):
 #   /opt/mcp-server-harmony/venv     the code                     root:root               0755
 #   /opt/mcp-server-harmony/run.sh   the service command          root:root               0755
+#   /opt/mcp-server-harmony/COMMIT   the installed commit, if any root:root               0644
 #   /etc/mcp-server-harmony/env      HTTP and Access settings     root:mcp-harmony        0640
 #   /var/lib/mcp-server-harmony/     config.json (the hub list,   mcp-harmony             0700
 #                                      HARMONY_CONFIG_DIR)
@@ -18,6 +19,8 @@
 # no credentials: a Harmony hub answers anyone on the LAN. The LXC needs TCP 8088
 # to each hub (and UDP multicast 1900 only if you use `discover`).
 # Re-running upgrades the code and keeps settings and the hub list.
+# COMMIT (the SHA installed, and this repo) is what /healthz and /harmony/mcp/healthz report; the
+# default SOURCE is pinned to main's current commit first, so the stamp names what pip installed.
 set -eu
 
 SRC="${1:-git+https://github.com/SDNick484/mcp-server-harmony}"
@@ -39,6 +42,13 @@ if ! id "$USER_NAME" >/dev/null 2>&1; then
 	adduser -S -D -H -h "$STATE" -s /sbin/nologin -G "$USER_NAME" "$USER_NAME"
 fi
 
+# Which commit SOURCE is, worked out before pip (commit.sh, shared with the sibling servers)
+. "$HERE/commit.sh"
+REPO=SDNick484/mcp-server-harmony
+pinned=$(commit_source "$SRC" "$REPO")
+SRC=$(printf '%s\n' "$pinned" | sed -n 1p)
+COMMIT=$(printf '%s\n' "$pinned" | sed -n 2p)
+
 python3 -m venv "$PREFIX/venv"
 "$PREFIX/venv/bin/pip" install --quiet --upgrade pip
 "$PREFIX/venv/bin/pip" install --quiet --upgrade "$SRC"
@@ -46,6 +56,8 @@ python3 -m venv "$PREFIX/venv"
 # and keeps it: re-running this script would upgrade nothing. Reinstall the package itself (not its
 # dependencies) so it always gets the code from SOURCE.
 "$PREFIX/venv/bin/pip" install --quiet --force-reinstall --no-deps "$SRC"
+# Only now that pip succeeded (set -e stops before this otherwise), so COMMIT never names code that isn't installed
+write_commit "$PREFIX" "$COMMIT" "$REPO"
 install -m 0755 "$HERE/run.sh" "$PREFIX/run.sh"
 
 install -d -m 0750 -o root -g "$USER_NAME" "$ETC"

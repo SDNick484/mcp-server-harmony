@@ -178,8 +178,11 @@ CF_ACCESS_TEAM_DOMAIN=<team>.cloudflareaccess.com CF_ACCESS_AUD=<aud tag> \
 ```
 
 `GET /healthz` answers 200 while at least one hub is connected and 503 when none is (or before
-the server has started), for a load balancer or `supervise-daemon` check. It doesn't contact the
-hubs, and it's answered before the Access check, so its body is only `{"status": ...}`.
+the server has started), for a load balancer or `supervise-daemon` check. `GET /harmony/mcp/healthz`
+(the route under the MCP path, the one a tunnel that routes only that path reaches) answers the same.
+It doesn't contact the hubs, and it's answered before the Access check, so its body is only
+`{"status": ...}` plus `"commit"` and `"repo"` when the install script stamped them (from
+`/opt/mcp-server-harmony/COMMIT`).
 
 Every request must carry a valid Access JWT (`Cf-Access-Jwt-Assertion`). The checks and the
 flags are documented in `src/harmony_mcp/remote.py`. The Host-header (DNS-rebinding) checks stay on
