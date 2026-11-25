@@ -40,6 +40,10 @@ _HW_2026_11_12_LIVE = (
     "2026-11-12, Office Hub and Bedroom Hub (firmware 4.15.600) driven through this server from a Claude session, "
     "with the owner at the TVs and the Harmony app; the Alpine service host for the history file"
 )
+_HW_2026_11_24 = (
+    "2026-11-24 (2026-11-25 UTC), Bedroom Hub (firmware 4.15.600 with Melodious 2.1.0 installed beside it; LG "
+    "OLED65C7, Shield TV 2019, Polk sound bar) driven by `call -v` from a development machine, owner in the room"
+)
 _HW_2026_11_04 = (
     "2026-11-04, Office Hub and Bedroom Hub (firmware 4.15.600) driven through this server from a Claude session"
 )
@@ -108,6 +112,17 @@ ASSUMPTIONS: tuple[Assumption, ...] = (
         "startActivityFinished.",
         "aioharmony's start_activity handlers; the fake hub's exact order and timing are hand-built",
         "medium",
+        note="Partial, " + _HW_2026_11_24 + ": two starts and two switches matched the order up to the last "
+        "startActivity frame (runactivity 200 'OK', stateDigest notify with activityStatus 1, startActivity "
+        "code 100 frames counting done/total, then the final frame with done equal to total). Not as "
+        "claimed: no startActivityFinished frame was seen in any of the five sequences; once, a stateDigest "
+        "notify with activityStatus 2 followed the code 200 frame. The power off sent a stateDigest notify "
+        "with activityStatus 3 first, then startActivity code 200, then a notify with activityId -1 and "
+        "activityStatus 0. Each `call` process disconnects right after its reply, so a later "
+        "startActivityFinished is not ruled out; a long-lived connection's log would settle it. Both "
+        "switches from SHIELD TV to Bedroom TV ended with code 505 'Bluetooth device not reachable' in "
+        "place of code 200, which this server reported as a refusal although the hub did switch (owner "
+        "saw it; status agreed). Not explained.",
     ),
     Assumption(
         "H-FORCE-OFF",
@@ -131,6 +146,11 @@ ASSUMPTIONS: tuple[Assumption, ...] = (
         "holdAction press/release gets no reply on success, only on failure.",
         "aioharmony send_commands comment ('the HUB sends a message back if there is an issue')",
         "medium",
+        note="Partial, " + _HW_2026_11_24 + ": the -v log showed a press and a release frame for each of five "
+        "taps (VolumeUp x3 and Mute twice on the sound bar) and three 2 s holds, and no reply frame for any "
+        "of them; the owner confirmed the taps took effect. Each process disconnected soon after its last "
+        "press, so a late reply is not ruled out. The 'only on failure' half is untested: no press has been "
+        "rejected (H-PRESS-ERROR).",
     ),
     Assumption(
         "H-PRESS-ERROR",
@@ -145,6 +165,14 @@ ASSUMPTIONS: tuple[Assumption, ...] = (
         "IR code while held (like a held physical button) is unknown.",
         "aioharmony SendCommandDevice.delay (press, sleep, release)",
         "low",
+        note="Partial, it depends on the device. 2026-11-04, Office Hub: held IR presses acted as one tap. "
+        + _HW_2026_11_24
+        + ": each held call took about 2 s longer than a tap. DirectionDown held 2000 ms on the Shield "
+        "(Bluetooth) kept scrolling for as long as it was held (owner saw it, once). DirectionDown held "
+        "2000 ms on the LG TV (IR), in its settings menu, moved one or two items and stopped. VolumeDown "
+        "held 2000 ms on the sound bar (IR) was sent, but the bar shows no level, so nothing was observed. "
+        "Bluetooth versus IR and Melodious versus stock firmware both differ from the Office run, so which "
+        "one makes a hold repeat is not known.",
     ),
     Assumption(
         "H-CONFIG-PUSH",
@@ -201,6 +229,10 @@ ASSUMPTIONS: tuple[Assumption, ...] = (
         "An activity start or power-off finishes within 60 s.",
         "none: our timeout, picked to cover slow TVs",
         "low",
+        status="hardware-verified",
+        note=_HW_2026_11_24 + ": two starts of SHIELD TV took 8.9 s and about 10 s, two switches to Bedroom "
+        "TV about 8.7 s and 9 s, and a power off 4.7 s, each timed as the whole `call` including its "
+        "connection. One hub and three devices; a slower TV or a longer activity is not covered.",
     ),
     Assumption(
         "H-FIXIT",

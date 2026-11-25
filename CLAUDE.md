@@ -141,7 +141,8 @@ explain the reasoning behind non-obvious changes instead of only making them.
 
 Partly verified on real hubs (2026-10-14: connect, status, names, power off; 2026-11-04: presses, activity
 start/switch, the busy guard, multi-hub rules, config push, reconnect; 2026-11-12: `fixit` against the app, channel digits
-on the Office LG, the sleep timer, activity history; see the `hardware-verified` and `hardware-contradicted` entries in
+on the Office LG, the sleep timer, activity history; 2026-11-24: start time under 60 s, and steps 5 to 8 and 11 re-run on the
+Bedroom Hub after it moved to Melodious 2.1.0 beside stock 4.15.600; see the `hardware-verified` and `hardware-contradicted` entries in
 `assumptions.py`); everything else against the simulator only (SSDP, frames, held buttons, the re-read after a
 reconnect; favorites and Bedroom channel entry are untried). HARDWARE_VALIDATION.md is the checklist (`doctor` points at
 its step 3, so keep the numbering). Captures from `doctor --dump` go in

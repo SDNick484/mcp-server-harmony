@@ -1,7 +1,8 @@
 # Hardware validation (Harmony)
 
 This repo is tested against a wire-level fake hub (`src/harmony_mcp/sim/fake_hub.py`) driven by the
-real aioharmony library, and on two physical Harmony Hubs (2026-10-14, 2026-11-04 and 2026-11-12),
+real aioharmony library, and on two physical Harmony Hubs (2026-10-14, 2026-11-04, 2026-11-12 and, for
+steps 5 to 8 and 11 on the Bedroom Hub after it moved to the Melodious firmware, 2026-11-24),
 which confirmed the `hardware-verified` entries in `assumptions.py`. This is the checklist for
 confirming the rest. The steps are ordered so each one depends only on the
 ones before it. Each step names the assumptions it confirms (ids and sources in
@@ -137,6 +138,29 @@ aioharmony's debug log; addresses are redacted). The `grep` should show, in orde
 Confirms: **H-START-SEQUENCE** (if the order matches, or record the order you see),
 **H-TIMING** (if the time was under 60 s).
 
+**Observed (2026-11-24 (2026-11-25 UTC), Bedroom Hub on firmware 4.15.600 with Melodious 2.1.0 installed beside it; LG OLED65C7, Shield TV (2019) and a Polk sound bar; `call -v` from a development machine, where this hub is named "Harmony Hub"; the owner in the room).** In the hub's config the TV is still labelled "LG OLED TV / OLED 77G1PUA": the hub moved
+rooms and the two models share IR codes.
+
+- `start_activity activity="SHIELD TV"` returned `"outcome": "done"` with `runactivity activityId=53859675`;
+  the whole call took 8.9 s. The owner confirmed everything was on. Home Assistant, an independent source,
+  showed the TV on HDMI 1 afterwards. Not asked: whether every device was on by the time the call returned.
+- Frames, in order: the `runactivity` reply (code 200, "OK"), a `stateDigest` notify with `activityStatus` 1,
+  four `startActivity` frames with code 100 (`done` 1 to 4 of `total` 5), then one with code 200 (`done` 5).
+  A second start later in the run gave the same order and was followed once by a `stateDigest` notify with
+  `activityStatus` 2.
+- **No `startActivityFinished` frame** was seen in any of five sequences (two starts, two switches, one
+  power off). Each `call` disconnects right after its reply, so this does not show the hub never sends it.
+  **H-START-SEQUENCE stays `simulator-only`** with this in its note; the log of a long-lived connection
+  would settle it.
+- **A switch reported as refused, twice.** Both switches from "SHIELD TV" to "Bedroom TV" ended with
+  `startActivity` code 505, "Bluetooth device not reachable" (`done` 4 of 4), in place of code 200, and the
+  tool failed with `Harmony Hub refused 'Bedroom TV': Bluetooth device not reachable`. The hub did switch:
+  the owner saw the TV on "Bedroom TV" and `get_status` showed it running. After the first switch the Shield
+  was still showing. Not explained (a guess: the hub could not reach the Shield over Bluetooth to put it to
+  sleep), and not compared with stock firmware.
+- **H-TIMING verified**: starts 8.9 s and about 10 s, switches about 9 s, power off 4.7 s, each the whole
+  call including its connection.
+
 ## 6. Presses
 
 ```sh
@@ -176,15 +200,26 @@ No press was ever rejected, so **H-PRESS-ERROR** is still untriggered. **H-PRESS
 `simulator-only`: that claim is about what is on the wire (no reply frame on success), and no `-v` frames were
 captured through the server. Only "no press was reported rejected" is shown.
 
+**Observed (2026-11-24 (2026-11-25 UTC), Bedroom Hub on firmware 4.15.600 with Melodious 2.1.0 installed beside it; LG OLED65C7, Shield TV (2019) and a Polk sound bar; `call -v` from a development machine, where this hub is named "Harmony Hub"; the owner in the room).**
+
+- `send_command command=VolumeUp repeat=3` (routed by "SHIELD TV" to the Polk sound bar), then `Mute` to the
+  sound bar twice about 4 s apart: all `"outcome": "done"`, and the owner confirmed they worked.
+- On the wire each press was a `holdAction` press frame and a release frame, and the hub sent **no reply
+  frame** for any of the five. The same held for the three holds in step 7.
+- **H-PRESS-SILENT stays `simulator-only`**, now with the success half seen: each process disconnects soon
+  after its last press, so a late reply is not ruled out, and no press has been rejected, so "only on
+  failure" is untested.
+
 ## 7. Holding a button
 
 ```sh
-mcp-server-harmony call send_command command=VolumeUp hold_ms=2000 hub="$HUB"
+mcp-server-harmony call send_command command=VolumeDown hold_ms=2000 hub="$HUB"
 ```
 
-Watch the volume. Does it go up **one** step, or keep rising for the two seconds the way a held
+Watch the volume. Does it go down **one** step, or keep falling for the two seconds the way a held
 button on the physical remote does? Write down which. Either is fine, and the tool description
-should say which it is.
+should say which it is. (This step used `VolumeUp` until the server began refusing a held volume-up press:
+"VolumeUp can't be held". If the device shows no volume level, hold a direction button in a menu instead.)
 
 Confirms: **H-HOLD** (record the behavior in `note`).
 
@@ -200,6 +235,21 @@ doesn't show what the device received. The likely explanation: a button's hold b
 own configured hold action in the Harmony setup, which falls back to the tap action when none is
 set. Not verified: whether any button has a configured hold action. Until it is, `hold_ms` should
 be treated as a tap with a timed press, not a sustained hold.
+
+**Observed (2026-11-24 (2026-11-25 UTC), Bedroom Hub on firmware 4.15.600 with Melodious 2.1.0 installed beside it; LG OLED65C7, Shield TV (2019) and a Polk sound bar; `call -v` from a development machine, where this hub is named "Harmony Hub"; the owner in the room).** It depends on the device:
+
+- `VolumeUp` with `hold_ms=2000` was refused by this server before anything was sent ("VolumeUp can't be
+  held ..."), which is why the command above changed.
+- `VolumeDown` with `hold_ms=2000`, routed to the Polk sound bar (IR): sent as a press frame and a release frame; the
+  call took about 2 s longer than a tap. The bar shows no volume level, so **nothing was observed**.
+- `DirectionDown` with `hold_ms=2000`, routed to the Shield (Bluetooth): the highlight **kept scrolling**
+  for as long as it was held (owner saw it; once).
+- `Settings`, then `DirectionDown` with `hold_ms=2000` to the LG TV (IR): the settings menu opened and the
+  highlight ended "two down from the top", so one or two items, not a run down the list.
+
+So a hold was sustained over Bluetooth and not over IR. The Office run was IR on stock firmware; this run
+differs in both the transport and the firmware (Melodious), so which one makes a hold repeat is not known.
+**H-HOLD stays `simulator-only`** with both results in its note.
 
 ## 8. Power off
 
@@ -243,6 +293,26 @@ Confirms: **H-POWEROFF**, **H-FORCE-OFF** (record the reply and any device left 
   reply code, and whether the hub answered the interrupted start separately, since no `-v` log was taken
   through the server. Still untested: `force` on a hub that is actually stuck. It would at least get past
   this server's own busy guard there, but nobody has seen a stuck hub yet.
+
+**Observed (2026-11-24 (2026-11-25 UTC), Bedroom Hub on firmware 4.15.600 with Melodious 2.1.0 installed beside it; LG OLED65C7, Shield TV (2019) and a Polk sound bar; `call -v` from a development machine, where this hub is named "Harmony Hub"; the owner in the room).** Only the Bedroom Hub was on, so the two-hub refusal and the forced power off were
+not run.
+
+- `power_off hub="Harmony Hub"` from "Bedroom TV" returned `done` with `runactivity activityId=-1 (power
+  off)` in 4.7 s; `get_status` then showed `power: off`. The owner confirmed everything was off.
+- Frames: the `runactivity` reply (code 200), a `stateDigest` notify with `activityStatus` 3, one
+  `startActivity` frame with code 200 (`done` 1 of `total` 1, naming the sound bar), then a notify with
+  `activityId` -1 and `activityStatus` 0.
+- **A stale "on".** Earlier the hub reported "SHIELD TV" running while Home Assistant showed the TV
+  unreachable and the Shield asleep, so `start_activity` returned `unchanged` and sent nothing. How the
+  devices went off was not established. The sound bar has only `PowerToggle`, so a power off and restart
+  was not used to recover; the TV's discrete `PowerOn` and a wake of the Shield from Home Assistant were.
+- **A press sent mid-sequence by a second process.** While one `call` was switching to "Bedroom TV", a
+  second `call` started 3.5 s later read a state digest with `activityStatus` 1 and still sent `VolumeDown`
+  to the sound bar (`done`; the hub did not reject it). The busy guard is set by the hub's pushed
+  notifications, which a server that connects mid-sequence has missed. This does not contradict the
+  2026-11-04 refusal seen on the long-running server; it is a gap at startup and after a reconnect.
+  Whether the press reached the sound bar was not observed. The same check with a start from the physical
+  remote was not run.
 
 ## 9. With Claude: config changes and reconnects
 
@@ -379,6 +449,16 @@ Confirms nothing new, but record what the two-minute timer did here.
   33 s after an off also worked, so "too soon after a power off" does not explain it. Not reproduced, and not
   called a bug in this server; recorded in case it comes back.
 
+**Observed (2026-11-24, Bedroom Hub on firmware 4.15.600 with Melodious 2.1.0 beside it, through the
+`serve --http` service from a Claude session; items 1 to 4 only).**
+
+- A 2-minute timer was set from "Bedroom TV": `sleep_timer` showed `fires_at`, `minutes_left: 2` and
+  `retrying: null`, with `last_sleep_timer` null.
+- A switch to "SHIELD TV" through the server returned `done` and left `sleep_timer` in place.
+- Status 9 s after `fires_at`: `power: off`, `sleep_timer` null, `last_sleep_timer` `fired` at 4 s after
+  `fires_at`. This is the server's own report; what the owner saw in the room was not recorded.
+- **Not run:** cancel, the drop on a power off from the remote, and the busy retry (items 5 and 6).
+
 ## 12. Tune a channel
 
 The owner has no cable box, so this uses an LG TV's own tuner (antenna or cable into the TV). Use the
@@ -488,15 +568,15 @@ service on the Alpine host; items 2 and 6 not run as written).**
 | `H-CONFIG-SHAPE`   | 3    | high              | via `test_recorded`; commands resolved on hardware 2026-11-04; two real 4.15.600 captures replayed 2026-11-12 |
 | `H-POWEROFF`       | 8    | high              |                                                           |
 | `H-NAME`           | 2    | high              |                                                           |
-| `H-START-SEQUENCE` | 5    | medium            | the order of frames, from the `-v` log                    |
+| `H-START-SEQUENCE` | 5    | medium            | 2026-11-24, Bedroom Hub: order matched up to the code 200 frame; no `startActivityFinished` seen from one-shot calls, so still simulator-only |
 | `H-FORCE-OFF`      | 8    | low               | **contradicted 2026-11-04**: the hub refused it mid-start ('Activity in progress') |
-| `H-PRESS-SILENT`   | 6    | medium            | no press reported rejected 2026-11-04; no `-v` frames, so still simulator-only |
+| `H-PRESS-SILENT`   | 6    | medium            | 2026-11-24: `-v` frames showed no reply to eight presses; a late reply and the failure half are open, so still simulator-only |
 | `H-PRESS-ERROR`    | none | low               | can't be triggered with commands from the hub's own config |
-| `H-HOLD`           | 7    | low               | Office Hub: held presses acted as one tap (see step 7)    |
+| `H-HOLD`           | 7    | low               | Office Hub (IR): one tap. Bedroom Hub 2026-11-24: sustained on the Shield (Bluetooth), one or two steps on the LG (IR); see step 7 |
 | `H-CONFIG-PUSH`    | 9    | medium            | **verified 2026-11-04** (rename showed up, no restart)    |
 | `H-RECONNECT`      | 9    | high              | also confirms the re-read after reconnect; 2026-11-04 reconnect seen, re-read not exercised |
 | `H-SSDP`           | 1    | medium            | no answer can be the network, not the hub                 |
-| `H-TIMING`         | 5    | low               |                                                           |
+| `H-TIMING`         | 5    | low               | **verified 2026-11-24** on the Bedroom Hub: starts and switches about 9 to 10 s, power off 4.7 s |
 | `H-FIXIT`          | 10   | medium            | **verified 2026-11-12** on firmware 4.15.600: shape present, two activities match the app; Bedroom TV input (Smart TV vs HDMI 1) open |
 | `H-DIGITS`         | 12   | medium            | **verified 2026-11-12** on the Office LG only: digits intact at 400 ms, `.` and `-` both accepted; single digits alone inconsistent |
 | `H-ACTIVITY-PUSH`  | 13   | medium            | **verified 2026-11-04** for starts from the remote (state followed with no call from us); step 13 re-checked 2026-11-12 (Alexa starts followed too; this server's own start gave one event) |

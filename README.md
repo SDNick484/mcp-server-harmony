@@ -14,7 +14,8 @@ Companion, 950), since the server talks to the hub, not the remote.
 > guard, an activity renamed in the Harmony app showing up without a restart, the activity
 > expected state (`fixit`) against the app, channel digits on one LG TV, the sleep timer, and the
 > activity history. Still simulator-only: SSDP discovery, the exact frames of a start and a press,
-> held buttons, and re-reading state after a reconnect. Not yet tried on hardware: favorites, channel
+> held buttons (a hold was sustained on a Bluetooth device and not on IR ones), and re-reading state after a reconnect.
+> One hub was re-checked on 2026-11-24 after moving to the open Melodious firmware, which runs beside the stock one. Not yet tried on hardware: favorites, channel
 > entry on the Bedroom Hub or a set-top box, and a start from the remote's own button for history. Every protocol detail is a named assumption (see
 > [Verification status](#verification-status)), and
 > [HARDWARE_VALIDATION.md](https://github.com/SDNick484/mcp-server-harmony/blob/main/HARDWARE_VALIDATION.md)
@@ -487,7 +488,7 @@ simulator only:
 | `H-CONFIG-PUSH`    | medium     | hardware-verified |
 | `H-RECONNECT`      | high       | simulator-only |
 | `H-SSDP`           | medium     | simulator-only |
-| `H-TIMING`         | low        | simulator-only |
+| `H-TIMING`         | low        | hardware-verified |
 | `H-FIXIT`          | medium     | hardware-verified |
 | `H-DIGITS`         | medium     | hardware-verified |
 | `H-ACTIVITY-PUSH`  | medium     | hardware-verified |
