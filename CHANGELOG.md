@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Hardware
+
+- Steps 5 to 8 and 11 of `HARDWARE_VALIDATION.md` re-run on the Bedroom Hub (2026-11-24) after it moved to the Melodious 2.1.0 firmware beside stock 4.15.600: everything this server uses still works. `H-TIMING` is `hardware-verified`. `H-START-SEQUENCE`, `H-PRESS-SILENT` and `H-HOLD` stay `simulator-only` with what was seen in their notes: a held press was sustained on the Shield (Bluetooth) and not on the LG TV (IR).
+- Recorded, not fixed: a switch from "SHIELD TV" to "Bedroom TV" is reported as refused ("Bluetooth device not reachable", code 505) although the hub switches; a server that connects while a sequence is running does not know the hub is busy and sends a press.
+- Step 7 now holds `VolumeDown`: the server refuses a held `VolumeUp`.
+
 ### Changed
 
 - Every tool now has an authorization tier (`read`, `power-off`, `everyday` or `costly`; synced `remote.py`, shared `@tier`). None is costly, so no tool asks for confirmation. `harmony_power_off` is `power-off`, and so is `harmony_set_sleep_timer` when it sets a timer (cancelling is `everyday`); `harmony_send_command` is `everyday` because it can press any button, power-on included. The volume-up cap is separate from tiers.
