@@ -311,8 +311,10 @@ not run.
   to the sound bar (`done`; the hub did not reject it). The busy guard is set by the hub's pushed
   notifications, which a server that connects mid-sequence has missed. This does not contradict the
   2026-11-04 refusal seen on the long-running server; it is a gap at startup and after a reconnect.
-  Whether the press reached the sound bar was not observed. The same check with a start from the physical
-  remote was not run.
+  Whether the press reached the sound bar was not observed. During this check the owner saw an on-screen
+  message about a button press not working; which screen showed it, its wording and which of the two
+  attempts it belonged to were not recorded. The same check with a start from the physical remote was not
+  run.
 
 ## 9. With Claude: config changes and reconnects
 
