@@ -64,7 +64,7 @@ from .limits import (
 )
 from .lookup import unknown_with_suggestions
 from .remote import request_state_security, tier
-from .tools import ACT, ACT_IDEMPOTENT, READ_ONLY
+from .tools import ACT, ACT_IDEMPOTENT, READ_ONLY, trim_tools
 
 log = logging.getLogger(__name__)
 
@@ -584,6 +584,10 @@ async def harmony_get_history(
     if not r.history.enabled:
         page["hint"] = 'History is turned off (HARMONY_HISTORY or "history" in config.json), so nothing is recorded.'
     return page
+
+
+# Every tool is registered by now: shorten what tools/list sends (see tools.py).
+trim_tools(mcp)
 
 
 # --- resources: the static catalog, for clients that attach context ----------------------
