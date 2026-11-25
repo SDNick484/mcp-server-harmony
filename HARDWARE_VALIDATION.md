@@ -467,7 +467,7 @@ Confirms nothing new, but record what the two-minute timer did here.
   `retrying: null`, with `last_sleep_timer` null.
 - A switch to "SHIELD TV" through the server returned `done` and left `sleep_timer` in place.
 - Status 9 s after `fires_at`: `power: off`, `sleep_timer` null, `last_sleep_timer` `fired` at 4 s after
-  `fires_at`. This is the server's own report; what the owner saw in the room was not recorded.
+  `fires_at`. The owner saw the TV go off.
 - **Not run:** cancel, the drop on a power off from the remote, and the busy retry (items 5 and 6).
 
 ## 12. Tune a channel
