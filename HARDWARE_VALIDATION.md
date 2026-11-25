@@ -152,7 +152,7 @@ rooms and the two models share IR codes.
   power off). Each `call` disconnects right after its reply, so this does not show the hub never sends it.
   **H-START-SEQUENCE stays `simulator-only`** with this in its note; the log of a long-lived connection
   would settle it.
-- **A switch reported as refused, twice.** Both switches from "SHIELD TV" to "Bedroom TV" ended with
+- **A switch reported as refused, every time (four of four).** The first two switches from "SHIELD TV" to "Bedroom TV" ended with
   `startActivity` code 505, "Bluetooth device not reachable" (`done` 4 of 4), in place of code 200, and the
   tool failed with `Harmony Hub refused 'Bedroom TV': Bluetooth device not reachable`. The hub did switch:
   the owner saw the TV on "Bedroom TV" and `get_status` showed it running. After the first switch the Shield
@@ -311,10 +311,19 @@ not run.
   to the sound bar (`done`; the hub did not reject it). The busy guard is set by the hub's pushed
   notifications, which a server that connects mid-sequence has missed. This does not contradict the
   2026-11-04 refusal seen on the long-running server; it is a gap at startup and after a reconnect.
-  Whether the press reached the sound bar was not observed. During this check the owner saw an on-screen
-  message about a button press not working; which screen showed it, its wording and which of the two
-  attempts it belonged to were not recorded. The same check with a start from the physical remote was not
-  run.
+  Whether the press reached the sound bar was not observed. Two repeats did not land a press
+  mid-sequence: one was refused with "No activity is running" (the hub was between off and "SHIELD TV"), and
+  one arrived after a 6 s switch had already finished. The same check with a start from the physical remote
+  was not run.
+- **A Shield message on a switch.** The owner saw, and photographed, the Shield showing "This accessory is
+  not supported to control your TV volume" as it came back on a switch to "SHIELD TV". It appeared on two
+  switches where a `VolumeDown` to the sound bar was also sent, and on a switch from "Bedroom TV" and back
+  with no press from this server at all; it did not appear on two `VolumeDown` presses with the activity
+  settled (the sound bar's light flashed for those, so the IR arrived). So the hub's own switch sequence
+  causes it, not a press. Not established: which step of the sequence, whether it happens from the physical
+  remote, and whether it happened before Melodious.
+- The switch from "SHIELD TV" to "Bedroom TV" gave the code 505 reply described in step 5 every time, four
+  out of four by the end of the run.
 
 ## 9. With Claude: config changes and reconnects
 
